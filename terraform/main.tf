@@ -35,100 +35,153 @@ locals {
       gpus      = 1
       # vram = 96G (1x RTX PRO 6000)
     }
-    "g4-standard-192" = {
-      disk_type = "hyperdisk-balanced"
-      disks     = 16
-      gpus      = 4
-      # vram = 384G (4x RTX PRO 6000)
-    }
   }
 
-  # Each model sets either `vllm_command` (extra vLLM args as shell, with line
-  # continuations, appended to the common `docker run` below) or a full
-  # `run_command`.
+  # Each model picks a `runtime` (a key of `var.machine_image`), and sets the
+  # instance size and extra args (shell, with line continuations, appended to
+  # the runtime's common `docker run` below) for it in `sizes` and `commands`.
+  # A full `run_command` can be given instead of `commands`.
   models = {
     "google/gemma-4-E2B-it" = {
-      size            = "g2-standard-4"
+      sizes           = { vllm = "g2-standard-4", llamacpp = "g2-standard-4" }
       spot            = false
       count           = 0
+      runtime         = "vllm"
       stop_when_ready = local.vllm_stop
-      vllm_command    = <<-EOF
-        --tool-call-parser gemma4 \
-        --chat-template examples/tool_chat_template_gemma4.jinja \
-        --reasoning-parser gemma4
-      EOF
+      commands = {
+        vllm = <<-EOF
+          --tool-call-parser gemma4 \
+          --chat-template examples/tool_chat_template_gemma4.jinja \
+          --reasoning-parser gemma4 \
+          --speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
+        EOF
+        # The repo's mtp-gemma-4-E2B-it-*.gguf drafter is fetched alongside the model
+        llamacpp = <<-EOF
+          -hf ggml-org/gemma-4-E2B-it-GGUF:BF16 \
+          --spec-type draft-mtp --spec-draft-n-max 2
+        EOF
+      }
     }
     "Qwen/Qwen3.5-9B" = {
-      size  = "g2-standard-24"
-      spot  = false
-      count = 1
+      sizes   = { vllm = "g2-standard-24", llamacpp = "g2-standard-8" }
+      spot    = false
+      count   = 1
+      runtime = "llamacpp"
       # stop_when_ready = local.vllm_stop
-      vllm_command = <<-EOF
-        --trust-remote-code \
-        --max-model-len 262144 \
-        --reasoning-parser qwen3 \
-        --tool-call-parser qwen3_coder \
-        --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-      EOF
+      commands = {
+        vllm     = <<-EOF
+          --trust-remote-code \
+          --max-model-len 262144 \
+          --reasoning-parser qwen3 \
+          --tool-call-parser qwen3_coder \
+          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+        EOF
+        llamacpp = <<-EOF
+          -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
+          -c 262144 \
+          --no-mmproj -np 1 \
+          --spec-type draft-mtp --spec-draft-n-max 2
+        EOF
+      }
     }
     "Qwen/Qwen3.6-27B" = {
-      size            = "g2-standard-48"
+      sizes           = { vllm = "g2-standard-48", llamacpp = "g2-standard-48" }
       spot            = true
       count           = 0
+      runtime         = "vllm"
       stop_when_ready = local.vllm_stop
-      vllm_command    = <<-EOF
-        --trust-remote-code \
-        --tool-call-parser qwen3_coder \
-        --reasoning-parser qwen3 \
-        --language-model-only \
-        --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-      EOF
+      commands = {
+        vllm     = <<-EOF
+          --trust-remote-code \
+          --tool-call-parser qwen3_coder \
+          --reasoning-parser qwen3 \
+          --language-model-only \
+          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+        EOF
+        llamacpp = <<-EOF
+          -hf unsloth/Qwen3.6-27B-MTP-GGUF:BF16 \
+          --no-mmproj -np 1 \
+          --spec-type draft-mtp --spec-draft-n-max 2
+        EOF
+      }
     }
     "Qwen/Qwen3.6-35B-A3B" = {
       # ~67G of BF16 weights on one 96G GPU. Only 10/40 layers use full
       # attention, so a full 262K context needs just ~5G of KV cache.
-      size            = "g4-standard-48"
+      sizes           = { vllm = "g4-standard-48", llamacpp = "g4-standard-48" }
       spot            = false
-      count           = 1
+      count           = 0
+      runtime         = "vllm"
       stop_when_ready = local.vllm_stop
-      vllm_command    = <<-EOF
-        --max-model-len 262144 \
-        --reasoning-parser qwen3 \
-        --tool-call-parser qwen3_coder \
-        --language-model-only \
-        --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-      EOF
+      commands = {
+        vllm     = <<-EOF
+          --max-model-len 262144 \
+          --reasoning-parser qwen3 \
+          --tool-call-parser qwen3_coder \
+          --language-model-only \
+          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+        EOF
+        llamacpp = <<-EOF
+          -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q5_K_M \
+          -c 262144 \
+          --no-mmproj -np 1 \
+          --spec-type draft-mtp --spec-draft-n-max 2
+        EOF
+      }
     }
     "Qwen/Qwen3.6-35B-A3B-FP8" = {
       # ~36G of block FP8 weights on 2x L4 (48G) is tight, so the context is
       # halved to leave room for KV cache. Qwen advise at least 128K for thinking.
-      size            = "g2-standard-24"
-      spot            = true
-      count           = 0
-      stop_when_ready = local.vllm_stop
-      vllm_command    = <<-EOF
-        --max-model-len 131072 \
-        --reasoning-parser qwen3 \
-        --tool-call-parser qwen3_coder \
-        --language-model-only \
-        --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-      EOF
+      sizes   = { vllm = "g2-standard-24", llamacpp = "g2-standard-24" }
+      spot    = true
+      count   = 0
+      runtime = "vllm"
+      # stop_when_ready  = local.vllm_stop
+      commands = {
+        vllm     = <<-EOF
+          --max-model-len 131072 \
+          --reasoning-parser qwen3 \
+          --tool-call-parser qwen3_coder \
+          --language-model-only \
+          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+        EOF
+        llamacpp = <<-EOF
+          -hf unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q8_0 \
+          -c 131072 \
+          --no-mmproj -np 1 \
+          --spec-type draft-mtp --spec-draft-n-max 2
+        EOF
+      }
     }
   }
 
+  # llama.cpp splits layers across all GPUs by default, and enables Jinja chat
+  # templates (tool calling) and reasoning extraction out of the box.
   run_commands = {
-    for name, model in local.models : name => try(model.run_command, <<-EOF
-      docker run -d --name vllm --gpus all \
-        --restart unless-stopped \
-        --privileged --ipc=host -p 8000:8000 \
-        -e HF_TOKEN \
-        -v /mnt/local-ssd/cache:/root/.cache \
-        vllm/vllm-openai:latest ${name} \
-        --tensor-parallel-size ${google_compute_instance_template.templates[model.size].labels.gpus} \
-        --enable-auto-tool-choice \
-        ${indent(2, trimspace(model.vllm_command))}
-    EOF
-    )
+    for name, model in local.models : name => try(model.run_command, {
+      vllm     = <<-EOF
+        docker run -d --name vllm --gpus all \
+          --restart unless-stopped \
+          --privileged --ipc=host -p 8000:8000 \
+          -e HF_TOKEN \
+          -v /mnt/local-ssd/cache:/root/.cache \
+          vllm/vllm-openai:latest ${name} \
+          --tensor-parallel-size ${local.sizes[model.sizes[model.runtime]].gpus} \
+          --enable-auto-tool-choice \
+          ${indent(2, trimspace(model.commands[model.runtime]))}
+      EOF
+      llamacpp = <<-EOF
+        docker run -d --name llama --gpus all \
+          --restart unless-stopped \
+          -p 8000:8080 \
+          -e HF_TOKEN \
+          -v /mnt/local-ssd/cache:/root/.cache \
+          ghcr.io/ggml-org/llama.cpp:server-cuda \
+          --alias ${name} \
+          -ngl all \
+          ${indent(2, trimspace(model.commands[model.runtime]))}
+      EOF
+    }[model.runtime])
   }
 }
 
@@ -173,10 +226,18 @@ resource "google_compute_firewall" "allow_egress" {
 
 # Instance template specifying the machine image, disk size, and Spot VM settings
 resource "google_compute_instance_template" "templates" {
-  for_each = local.sizes
+  # One template per size and machine image variant, e.g. "g2-standard-24-vllm"
+  for_each = merge([
+    for size, config in local.sizes : {
+      for variant, image in var.machine_image : "${size}-${variant}" => merge(config, {
+        machine_type = size
+        image        = image
+      })
+    }
+  ]...)
 
   name_prefix  = each.key
-  machine_type = each.key
+  machine_type = each.value.machine_type
 
   labels = {
     gpus  = tostring(each.value.gpus)
@@ -185,7 +246,7 @@ resource "google_compute_instance_template" "templates" {
 
   // Disk configuration
   disk {
-    source_image = var.machine_image
+    source_image = each.value.image
     auto_delete  = true
     boot         = true
     disk_size_gb = 50
@@ -263,7 +324,7 @@ resource "google_compute_instance_from_template" "vm" {
 
   name                     = replace(lower(split("/", each.key)[1]), ".", "-")
   zone                     = var.zone
-  source_instance_template = google_compute_instance_template.templates[each.value.size].id
+  source_instance_template = google_compute_instance_template.templates["${each.value.sizes[each.value.runtime]}-${each.value.runtime}"].id
 
   service_account {
     email  = google_service_account.vm[each.key].email

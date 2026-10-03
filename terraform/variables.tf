@@ -24,8 +24,8 @@ variable "zone" {
 }
 
 variable "machine_image" {
-  type        = string
-  description = "The source machine image for the boot disk"
+  type        = map(string)
+  description = "Source machine image for the boot disk, keyed by variant (a model's `runtime`)"
 }
 
 variable "client_ip" {
