@@ -1,0 +1,59 @@
+{
+  "variables": {
+    "build_prefix": "",
+    "docker_version": "",
+    "cuda_drivers_version": "",
+    "image_version": "",
+    "gcp_project_id": ""
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `gcp_project_id`}}",
+      "source_image": "ubuntu-2604-resolute-amd64-v20260527",
+      "image_name": "{{user `build_prefix`}}llm-cuda-{{user `image_version` | clean_resource_name}}",
+      "instance_name": "{{user `build_prefix`}}llm-cuda-{{user `image_version` | clean_resource_name}}",
+      "ssh_username": "ubuntu",
+      "zone": "{{user `gcp_zone`}}",
+      "disk_size": 50
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": ["cloud-init status --long --wait"]
+    },
+    {
+      "type": "shell",
+      "inline": ["sudo apt update -y && sudo apt upgrade -y && sudo apt install -y zfsutils-linux nvitop"]
+    },
+    {
+      "type": "shell",
+      "scripts": [
+        "provisioners/kernel/kernel-tuning.sh"
+      ]
+    },
+    {
+      "type": "shell",
+      "scripts": ["provisioners/install-docker.sh"],
+      "environment_vars": ["DOCKER_VERSION={{user `docker_version`}}"]
+    },
+    {
+      "type": "shell",
+      "environment_vars": ["CUDA_DRIVERS_VERSION={{user `cuda_drivers_version`}}"],
+      "script": "provisioners/cuda.sh"
+    },
+    {
+      "type": "shell",
+      "script": "provisioners/install-nvidia-container-toolkit.sh"
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "sudo systemctl start docker.service",
+        "sudo docker pull vllm/vllm-openai:latest",
+        "sudo docker pull ghcr.io/ggml-org/llama.cpp:server-cuda"
+      ]
+    }
+  ]
+}
