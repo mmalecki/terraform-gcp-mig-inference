@@ -205,7 +205,7 @@ locals {
       model   = "Qwen/Qwen3.5-9B"
       variant = "llamacpp-q5_k_m"
       zone    = var.zone
-      count   = 1
+      count   = 0
       spot    = false
       # stop_when_ready = local.vllm_stop
     }
@@ -221,7 +221,7 @@ locals {
       model           = "Qwen/Qwen3.6-35B-A3B"
       variant         = "llamacpp-q5_k_m"
       zone            = "us-east4-c"
-      count           = 1
+      count           = 0
       spot            = false
       # stop_when_ready = local.vllm_stop
     }
@@ -242,8 +242,6 @@ locals {
       region  = regex("^(.+)-[a-z]$", instance.zone)[0]
     })
   }
-  # Regions that have at least one model instance, and so need templates
-  instance_regions = toset([for instance in local.instances : instance.region])
   active_instances = { for name, instance in local.instances : name => instance if instance.count > 0 }
 
   # llama.cpp splits layers across all GPUs by default, and enables Jinja chat
@@ -319,45 +317,33 @@ resource "google_compute_firewall" "allow_egress" {
   direction          = "EGRESS"
 }
 
-# Instance template specifying the machine image, disk size, and scheduling
+# Instance template per active model instance. The template carries everything
+# that varies per model (size, spot, service account and startup script), and
+# is rolled out by the model's managed instance group.
 resource "google_compute_instance_template" "templates" {
-  # One template per region, size and runtime machine image, e.g.
-  # "europe-west4-g2-standard-24-vllm". A template's subnetwork is regional, so
-  # templates can't be shared across regions.
-  for_each = merge(flatten([
-    for region in local.instance_regions : [
-      for size, config in local.sizes : {
-        for runtime, image in var.machine_image : "${region}-${size}-${runtime}" => merge(config, {
-          region       = region
-          machine_type = size
-          image        = image
-          name_prefix  = "${size}-${runtime}"
-        })
-      }
-    ]
-  ])...)
+  for_each = local.active_instances
 
-  name_prefix  = each.value.name_prefix
-  machine_type = each.value.machine_type
+  name_prefix  = "${each.value.vm_name}-"
+  machine_type = each.value.variant.size
 
   labels = {
-    gpus   = tostring(each.value.gpus)
-    disks  = tostring(each.value.disks)
+    gpus   = tostring(local.sizes[each.value.variant.size].gpus)
+    disks  = tostring(local.sizes[each.value.variant.size].disks)
     region = each.value.region
   }
 
   // Disk configuration
   disk {
-    source_image = each.value.image
+    source_image = var.machine_image[each.value.variant.runtime]
     auto_delete  = true
     boot         = true
     disk_size_gb = 50
-    disk_type    = lookup(each.value, "disk_type", "pd-balanced")
+    disk_type    = lookup(local.sizes[each.value.variant.size], "disk_type", "pd-balanced")
   }
 
   // Dynamic Local SSD (Scratch disks)
   dynamic "disk" {
-    for_each = range(each.value.disks)
+    for_each = range(local.sizes[each.value.variant.size].disks)
     content {
       disk_type    = "local-ssd"
       interface    = "NVME"
@@ -375,63 +361,6 @@ resource "google_compute_instance_template" "templates" {
     }
   }
 
-  // Scheduling defaults, Spot is set per instance
-  scheduling {
-    on_host_maintenance = "TERMINATE"
-    automatic_restart   = false
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# Dedicated service account per VM
-resource "google_service_account" "vm" {
-  for_each = local.active_instances
-
-  account_id   = each.value.vm_name
-  display_name = "Scallama inference VM for ${each.key}"
-
-  lifecycle {
-    precondition {
-      condition     = length(each.value.vm_name) >= 6 && length(each.value.vm_name) <= 30
-      error_message = "VM name \"${each.value.vm_name}\" must be 6-30 characters to name its service account."
-    }
-  }
-}
-
-# APIs required by this deployment
-resource "google_project_service" "services" {
-  for_each = toset([
-    "secretmanager.googleapis.com",
-  ])
-
-  project            = var.project_id
-  service            = each.key
-  disable_on_destroy = false
-}
-
-# Allow each VM to read the optional `hf-token` secret
-resource "google_secret_manager_secret_iam_member" "hf_token" {
-  for_each = google_service_account.vm
-
-  project   = var.project_id
-  secret_id = "hf-token"
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${each.value.email}"
-
-  depends_on = [google_project_service.services]
-}
-
-# Compute Instance created from the template
-resource "google_compute_instance_from_template" "vm" {
-  for_each = local.active_instances
-
-  name                     = each.value.vm_name
-  zone                     = each.value.zone
-  source_instance_template = google_compute_instance_template.templates["${each.value.region}-${each.value.variant.size}-${each.value.variant.runtime}"].id
-
   scheduling {
     preemptible                 = each.value.spot
     provisioning_model          = each.value.spot ? "SPOT" : "STANDARD"
@@ -443,20 +372,6 @@ resource "google_compute_instance_from_template" "vm" {
   service_account {
     email  = google_service_account.vm[each.key].email
     scopes = ["cloud-platform"]
-  }
-
-  # The token is read on first boot, so access must be granted beforehand
-  depends_on = [google_secret_manager_secret_iam_member.hf_token]
-
-  lifecycle {
-    precondition {
-      condition     = contains(keys(var.region_subnets), each.value.region)
-      error_message = "Region \"${each.value.region}\" for \"${each.key}\" has no entry in var.region_subnets."
-    }
-    precondition {
-      condition     = each.value.count <= 1
-      error_message = "count > 1 is not supported for \"${each.key}\", add another model_instances entry instead."
-    }
   }
 
   metadata_startup_script = <<-EOF
@@ -503,16 +418,124 @@ resource "google_compute_instance_from_template" "vm" {
     systemctl mask cloud-init-local.service snapd.service snapd.socket snapd.seeded.service
 EOF
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      %{if lookup(each.value, "stop_when_ready", null) != null}
-      echo "Waiting for health check at port ${lookup(each.value.stop_when_ready, "health_check_port", 8000)} and path ${lookup(each.value.stop_when_ready, "health_check_path", "/health")} to pass..."
-      while ! curl -s -f http://${self.network_interface[0].access_config[0].nat_ip}:${lookup(each.value.stop_when_ready, "health_check_port", 8000)}${lookup(each.value.stop_when_ready, "health_check_path", "/health")} > /dev/null; do
-        sleep 10
-      done
-      echo "Health check passed. Stopping VM while persisting local disks..."
-      gcloud compute instances stop ${self.name} --zone=${self.zone} --discard-local-ssd=False
-      %{endif}
-    EOT
+  # The token is read on first boot, so access must be granted beforehand
+  depends_on = [google_secret_manager_secret_iam_member.hf_token]
+
+  lifecycle {
+    create_before_destroy = true
+    precondition {
+      condition     = contains(keys(var.region_subnets), each.value.region)
+      error_message = "Region \"${each.value.region}\" for \"${each.key}\" has no entry in var.region_subnets."
+    }
   }
+}
+
+# Dedicated service account per VM
+resource "google_service_account" "vm" {
+  for_each = local.active_instances
+
+  account_id   = each.value.vm_name
+  display_name = "Scallama inference VM for ${each.key}"
+
+  lifecycle {
+    precondition {
+      condition     = length(each.value.vm_name) >= 6 && length(each.value.vm_name) <= 30
+      error_message = "VM name \"${each.value.vm_name}\" must be 6-30 characters to name its service account."
+    }
+  }
+}
+
+# APIs required by this deployment
+resource "google_project_service" "services" {
+  for_each = toset([
+    "secretmanager.googleapis.com",
+  ])
+
+  project            = var.project_id
+  service            = each.key
+  disable_on_destroy = false
+}
+
+# Allow each VM to read the optional `hf-token` secret
+resource "google_secret_manager_secret_iam_member" "hf_token" {
+  for_each = google_service_account.vm
+
+  project   = var.project_id
+  secret_id = "hf-token"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${each.value.email}"
+
+  depends_on = [google_project_service.services]
+}
+
+# One regional managed instance group per active model instance, pinned to the
+# model's zone. No load balancing: instances are addressed individually.
+resource "google_compute_region_instance_group_manager" "mig" {
+  for_each = local.active_instances
+
+  name                      = each.value.vm_name
+  base_instance_name        = each.value.vm_name
+  region                    = each.value.region
+  distribution_policy_zones = [each.value.zone]
+  target_size               = each.value.count
+
+  version {
+    instance_template = google_compute_instance_template.templates[each.key].self_link
+  }
+
+  # GPU quota rarely allows a surge instance: replace in place
+  update_policy {
+    type                  = "PROACTIVE"
+    minimal_action        = "REPLACE"
+    max_surge_fixed       = 0
+    max_unavailable_fixed = 1
+  }
+
+  # Instances must exist for the data sources below to read their addresses
+  wait_for_instances = true
+}
+
+# Instances currently in each group
+data "google_compute_region_instance_group" "mig" {
+  for_each = google_compute_region_instance_group_manager.mig
+
+  name   = each.value.name
+  region = each.value.region
+}
+
+locals {
+  mig_instance_links = {
+    for name, group in data.google_compute_region_instance_group.mig :
+    name => sort([for i in group.instances : i.instance])
+  }
+
+  # One entry per desired instance, keyed "<model>#<index>"
+  mig_instance_keys = merge([
+    for name, instance in local.active_instances : {
+      for i in range(instance.count) : "${name}#${i}" => {
+        name  = name
+        index = i
+      }
+    }
+  ]...)
+}
+
+data "google_compute_instance" "mig" {
+  for_each = local.mig_instance_keys
+
+  self_link = local.mig_instance_links[each.value.name][each.value.index]
+}
+
+locals {
+  # Instances per model, in a stable order
+  model_vms = {
+    for name, instance in local.instances : name => [
+      for i in range(instance.count) : data.google_compute_instance.mig["${name}#${i}"]
+      if contains(keys(local.active_instances), name)
+    ]
+  }
+
+  # For now only the first instance of a model is used where one is needed
+  # (scallama_config output).
+  first_vm = { for name, vms in local.model_vms : name => vms[0] if length(vms) > 0 }
 }

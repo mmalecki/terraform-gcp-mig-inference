@@ -1,16 +1,17 @@
-output "instance_name" {
-  description = "The name of the created compute instance"
-  value       = [for instance in google_compute_instance_from_template.vm : instance.name]
+output "instance_addresses" {
+  description = "Addresses of the instances in each model's managed instance group, keyed by model"
+  value = {
+    for name, vms in local.model_vms : name => {
+      names       = [for vm in vms : vm.name]
+      public_ips  = [for vm in vms : vm.network_interface[0].access_config[0].nat_ip]
+      private_ips = [for vm in vms : vm.network_interface[0].network_ip]
+    }
+  }
 }
 
-output "instance_self_link" {
-  description = "Self-link of the created compute instance"
-  value       = [for instance in google_compute_instance_from_template.vm : instance.self_link]
-}
-
-output "public_ip" {
-  description = "The public ephemeral IP address of the instance"
-  value       = [for instance in google_compute_instance_from_template.vm : instance.network_interface[0].access_config[0].nat_ip]
+output "instance_groups" {
+  description = "Self-link of each model's managed instance group"
+  value       = { for name, mig in google_compute_region_instance_group_manager.mig : name => mig.instance_group }
 }
 
 output "start_commands" {
@@ -36,11 +37,11 @@ output "scallama_config" {
         idle_timeout      = "2m"
         health_check_path = try(instance.stop_when_ready.health_check_path, "/health")
         options = {
-          baseURL = "http://{{public_ips.${instance.vm_name}}}:8000/"
+          baseURL = "http://{{public_ips.${try(local.first_vm[name].name, instance.vm_name)}}}:8000/"
         }
         backend = {
           type           = "gcp_compute_engine"
-          instance_names = [instance.vm_name]
+          instance_names = [try(local.first_vm[name].name, instance.vm_name)]
           zone           = instance.zone
           project_id     = var.project_id
         }
