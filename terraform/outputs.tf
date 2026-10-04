@@ -42,7 +42,7 @@ output "scallama_config" {
         backend = {
           type           = "gcp_compute_engine"
           instance_names = [try(local.first_vm[name].name, instance.vm_name)]
-          zone           = instance.zone
+          zone           = try(local.first_vm[name].zone, null)
           project_id     = var.project_id
         }
       }

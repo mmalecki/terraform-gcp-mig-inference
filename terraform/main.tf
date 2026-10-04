@@ -190,13 +190,14 @@ locals {
   # Deployed instances, keyed by the model name they serve (and scallama routes
   # by). The VM is named after the last path segment of the key.
   #
-  # Each instance sets the `zone` it runs in. Its region is taken from the zone
-  # and must be a key of `var.region_subnets`.
+  # Each instance sets the `region` it runs in, which must be a key of
+  # `var.region_subnets`. Its group spreads instances across all zones of the
+  # region.
   model_instances = {
     "google/gemma-4-E2B-it" = {
       model           = "google/gemma-4-E2B-it"
       variant         = "vllm"
-      zone            = var.zone
+      region          = var.region
       count           = 0
       spot            = false
       # stop_when_ready = local.vllm_stop
@@ -204,7 +205,7 @@ locals {
     "Qwen/Qwen3.5-9B" = {
       model   = "Qwen/Qwen3.5-9B"
       variant = "llamacpp-q5_k_m"
-      zone    = var.zone
+      region  = var.region
       count   = 0
       spot    = false
       # stop_when_ready = local.vllm_stop
@@ -212,7 +213,7 @@ locals {
     "Qwen/Qwen3.6-27B" = {
       model           = "Qwen/Qwen3.6-27B"
       variant         = "vllm"
-      zone            = var.zone
+      region          = var.region
       count           = 0
       spot            = true
       # stop_when_ready = local.vllm_stop
@@ -220,7 +221,7 @@ locals {
     "Qwen/Qwen3.6-35B-A3B" = {
       model           = "Qwen/Qwen3.6-35B-A3B"
       variant         = "llamacpp-q5_k_m"
-      zone            = "us-east4-c"
+      region          = "us-east4"
       count           = 0
       spot            = false
       # stop_when_ready = local.vllm_stop
@@ -228,7 +229,7 @@ locals {
     "Qwen/Qwen3.6-35B-A3B-FP8" = {
       model   = "Qwen/Qwen3.6-35B-A3B"
       variant = "vllm-fp8"
-      zone    = var.zone
+      region  = var.region
       count   = 0
       spot    = true
       # stop_when_ready  = local.vllm_stop
@@ -239,7 +240,6 @@ locals {
     for name, instance in local.model_instances : name => merge(instance, {
       vm_name = replace(lower(element(split("/", name), length(split("/", name)) - 1)), "/[^a-z0-9-]/", "-")
       variant = local.models[instance.model].variants[instance.variant]
-      region  = regex("^(.+)-[a-z]$", instance.zone)[0]
     })
   }
   active_instances = { for name, instance in local.instances : name => instance if instance.count > 0 }
@@ -468,15 +468,15 @@ resource "google_secret_manager_secret_iam_member" "hf_token" {
   depends_on = [google_project_service.services]
 }
 
-# One regional managed instance group per active model instance, pinned to the
-# model's zone. No load balancing: instances are addressed individually.
+# One regional managed instance group per active model instance, spread across
+# all zones of the model's region. No load balancing: instances are addressed
+# individually.
 resource "google_compute_region_instance_group_manager" "mig" {
   for_each = local.active_instances
 
   name                      = each.value.vm_name
   base_instance_name        = each.value.vm_name
   region                    = each.value.region
-  distribution_policy_zones = [each.value.zone]
   target_size               = each.value.count
 
   version {
@@ -515,7 +515,6 @@ locals {
       for i in range(instance.count) : "${name}#${i}" => {
         name  = name
         index = i
-        zone  = instance.zone
       }
     }
   ]...)
@@ -525,9 +524,10 @@ data "google_compute_instance" "mig" {
   for_each = local.mig_instance_keys
 
   # The data source doesn't fill in `name` and `zone` when given a self link,
-  # so pass them explicitly.
+  # so pass them explicitly. Instances land in any zone of the region, so both
+  # are taken from the link: .../zones/<zone>/instances/<name>
   name = element(split("/", local.mig_instance_links[each.value.name][each.value.index]), -1)
-  zone = each.value.zone
+  zone = element(split("/", local.mig_instance_links[each.value.name][each.value.index]), -3)
 }
 
 locals {
