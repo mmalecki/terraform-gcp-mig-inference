@@ -191,8 +191,9 @@ locals {
   # by). The VM is named after the last path segment of the key.
   #
   # Each instance sets the `region` it runs in, which must be a key of
-  # `var.region_subnets`. Its group spreads instances across all zones of the
-  # region.
+  # `var.region_subnets`. Its group spreads instances across the zones of the
+  # region that offer the instance's machine type. Set `zones` (a list of zone
+  # names) to use exactly those zones instead.
   model_instances = {
     "google/gemma-4-E2B-it" = {
       model           = "google/gemma-4-E2B-it"
@@ -468,25 +469,65 @@ resource "google_secret_manager_secret_iam_member" "hf_token" {
   depends_on = [google_project_service.services]
 }
 
-# All zones that are up in each region with an active model instance
+# All zones of each region with an active model instance
 data "google_compute_zones" "available" {
   for_each = toset([for instance in local.active_instances : instance.region])
 
   region = each.key
-  status = "UP"
+}
+
+locals {
+  # Candidate zones per model: the `zones` override if given, else the region's
+  zone_candidates = {
+    for name, instance in local.active_instances :
+    name => try(instance.zones, data.google_compute_zones.available[instance.region].names)
+  }
+
+  # Zone and machine type pairs to check, for models without a `zones` override
+  machine_type_checks = merge([
+    for name, instance in local.active_instances : {
+      for zone in local.zone_candidates[name] : "${zone}|${instance.variant.size}" => {
+        zone = zone
+        size = instance.variant.size
+      }
+    } if try(instance.zones, null) == null
+  ]...)
+}
+
+# Zones don't all offer every machine type, especially GPU ones
+data "google_compute_machine_types" "available" {
+  for_each = local.machine_type_checks
+
+  zone   = each.value.zone
+  filter = "name = \"${each.value.size}\""
+}
+
+locals {
+  # Zones each model's group is spread over
+  mig_zones = {
+    for name, instance in local.active_instances : name => (
+      try(instance.zones, null) != null ? instance.zones : [
+        for zone in local.zone_candidates[name] : zone
+        if length(data.google_compute_machine_types.available["${zone}|${instance.variant.size}"].machine_types) > 0
+      ]
+    )
+  }
 }
 
 # One regional managed instance group per active model instance, spread across
-# all zones of the model's region. No load balancing: instances are addressed
-# individually.
+# the zones of the model's region that offer its machine type. No load
+# balancing: instances are addressed individually.
 resource "google_compute_region_instance_group_manager" "mig" {
   for_each = local.active_instances
 
   name                      = each.value.vm_name
   base_instance_name        = each.value.vm_name
   region                    = each.value.region
-  distribution_policy_zones = data.google_compute_zones.available[each.value.region].names
+  distribution_policy_zones = local.mig_zones[each.key]
   target_size               = each.value.count
+
+  # Place instances in whichever zone has capacity, rather than evenly
+  distribution_policy_target_shape = "ANY"
 
   version {
     instance_template = google_compute_instance_template.templates[each.key].self_link
@@ -494,16 +535,26 @@ resource "google_compute_region_instance_group_manager" "mig" {
 
   # GPU quota rarely allows a surge instance: replace in place. Fixed values on
   # a regional group must be 0 or at least the number of zones, and percentages
-  # need a group of at least 10.
+  # need a group of at least 10. RECREATE keeps instance names across
+  # replacements, and the ANY distribution shape needs redistribution off.
   update_policy {
-    type                  = "PROACTIVE"
-    minimal_action        = "REPLACE"
-    max_surge_fixed       = 0
-    max_unavailable_fixed = length(data.google_compute_zones.available[each.value.region].names)
+    type                         = "PROACTIVE"
+    minimal_action               = "REPLACE"
+    replacement_method           = "RECREATE"
+    instance_redistribution_type = "NONE"
+    max_surge_fixed              = 0
+    max_unavailable_fixed        = length(local.mig_zones[each.key])
   }
 
   # Instances must exist for the data sources below to read their addresses
   wait_for_instances = true
+
+  lifecycle {
+    precondition {
+      condition     = length(local.mig_zones[each.key]) > 0
+      error_message = "No zone in \"${each.value.region}\" offers machine type \"${each.value.variant.size}\" for \"${each.key}\". Set `zones` for it, or pick another size or region."
+    }
+  }
 }
 
 # Instances currently in each group
