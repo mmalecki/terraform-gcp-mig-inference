@@ -483,12 +483,14 @@ resource "google_compute_region_instance_group_manager" "mig" {
     instance_template = google_compute_instance_template.templates[each.key].self_link
   }
 
-  # GPU quota rarely allows a surge instance: replace in place
+  # GPU quota rarely allows a surge instance: replace in place. Percentages are
+  # used because fixed values on a regional group must be 0 or at least the number
+  # of zones.
   update_policy {
-    type                  = "PROACTIVE"
-    minimal_action        = "REPLACE"
-    max_surge_fixed       = 0
-    max_unavailable_fixed = 1
+    type                    = "PROACTIVE"
+    minimal_action          = "REPLACE"
+    max_surge_percent       = 0
+    max_unavailable_percent = 100
   }
 
   # Instances must exist for the data sources below to read their addresses
