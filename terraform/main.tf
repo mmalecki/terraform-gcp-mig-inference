@@ -206,7 +206,7 @@ locals {
       model   = "Qwen/Qwen3.5-9B"
       variant = "llamacpp-q5_k_m"
       region  = var.region
-      count   = 0
+      count   = 1
       spot    = false
       # stop_when_ready = local.vllm_stop
     }
@@ -222,7 +222,7 @@ locals {
       model           = "Qwen/Qwen3.6-35B-A3B"
       variant         = "llamacpp-q5_k_m"
       region          = "us-east4"
-      count           = 0
+      count           = 1
       spot            = false
       # stop_when_ready = local.vllm_stop
     }
@@ -468,6 +468,14 @@ resource "google_secret_manager_secret_iam_member" "hf_token" {
   depends_on = [google_project_service.services]
 }
 
+# All zones that are up in each region with an active model instance
+data "google_compute_zones" "available" {
+  for_each = toset([for instance in local.active_instances : instance.region])
+
+  region = each.key
+  status = "UP"
+}
+
 # One regional managed instance group per active model instance, spread across
 # all zones of the model's region. No load balancing: instances are addressed
 # individually.
@@ -477,20 +485,21 @@ resource "google_compute_region_instance_group_manager" "mig" {
   name                      = each.value.vm_name
   base_instance_name        = each.value.vm_name
   region                    = each.value.region
+  distribution_policy_zones = data.google_compute_zones.available[each.value.region].names
   target_size               = each.value.count
 
   version {
     instance_template = google_compute_instance_template.templates[each.key].self_link
   }
 
-  # GPU quota rarely allows a surge instance: replace in place. Percentages are
-  # used because fixed values on a regional group must be 0 or at least the number
-  # of zones.
+  # GPU quota rarely allows a surge instance: replace in place. Fixed values on
+  # a regional group must be 0 or at least the number of zones, and percentages
+  # need a group of at least 10.
   update_policy {
-    type                    = "PROACTIVE"
-    minimal_action          = "REPLACE"
-    max_surge_percent       = 0
-    max_unavailable_percent = 100
+    type                  = "PROACTIVE"
+    minimal_action        = "REPLACE"
+    max_surge_fixed       = 0
+    max_unavailable_fixed = length(data.google_compute_zones.available[each.value.region].names)
   }
 
   # Instances must exist for the data sources below to read their addresses
