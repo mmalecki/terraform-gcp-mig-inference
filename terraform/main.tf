@@ -221,10 +221,10 @@ locals {
     }
     "Qwen/Qwen3.5-9B" = {
       model   = "Qwen/Qwen3.5-9B"
-      region  = var.region
+      region  = "us-central1"
       variant = "llamacpp-q5_k_m-multi"
       count   = 1
-      spot    = false
+      spot    = true
       # stop_when_ready = local.vllm_stop
     }
     "Qwen/Qwen3.6-27B" = {
@@ -535,6 +535,10 @@ locals {
 # balancing: instances are addressed individually.
 resource "google_compute_region_instance_group_manager" "mig" {
   for_each = local.active_instances
+
+  timeouts {
+    create = "5m"
+  }
 
   name                      = each.value.vm_name
   base_instance_name        = each.value.vm_name

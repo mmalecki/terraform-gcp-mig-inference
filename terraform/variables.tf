@@ -16,6 +16,7 @@ variable "region_subnets" {
     "europe-west4": "10.0.140.0/24",
     "us-central1": "10.0.200.0/24",
     "us-east4": "10.0.210.0/24",
+    "us-east5": "10.0.220.0/24",
   }
 }
 
