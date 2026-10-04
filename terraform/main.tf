@@ -97,6 +97,22 @@ locals {
             --spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
+        llamacpp-q5_k_m-multi = {
+          runtime = "llamacpp"
+          size    = "g4-standard-48"
+          command = <<-EOF
+            -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
+            -c 262144 \
+            -np 8 --kv-unified \
+            --no-mmproj \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0 \
+            --spec-type draft-mtp --spec-draft-n-max 2
+          EOF
+        }
       }
     }
     "Qwen/Qwen3.6-27B" = {
@@ -205,8 +221,8 @@ locals {
     }
     "Qwen/Qwen3.5-9B" = {
       model   = "Qwen/Qwen3.5-9B"
-      variant = "llamacpp-q5_k_m"
       region  = var.region
+      variant = "llamacpp-q5_k_m-multi"
       count   = 1
       spot    = false
       # stop_when_ready = local.vllm_stop
@@ -223,7 +239,7 @@ locals {
       model           = "Qwen/Qwen3.6-35B-A3B"
       variant         = "llamacpp-q5_k_m"
       region          = "us-east4"
-      count           = 1
+      count           = 0
       spot            = false
       # stop_when_ready = local.vllm_stop
     }
