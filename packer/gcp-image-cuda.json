@@ -3,6 +3,7 @@
     "build_prefix": "",
     "docker_version": "",
     "cuda_drivers_version": "",
+    "node_major_version": "24",
     "image_version": "",
     "gcp_project_id": ""
   },
@@ -37,6 +38,11 @@
       "type": "shell",
       "scripts": ["provisioners/install-docker.sh"],
       "environment_vars": ["DOCKER_VERSION={{user `docker_version`}}"]
+    },
+    {
+      "type": "shell",
+      "environment_vars": ["NODE_MAJOR_VERSION={{user `node_major_version`}}"],
+      "script": "provisioners/install-nodejs.sh"
     },
     {
       "type": "shell",
