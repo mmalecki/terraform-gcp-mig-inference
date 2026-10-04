@@ -37,151 +37,244 @@ locals {
     }
   }
 
-  # Each model picks a `runtime` (a key of `var.machine_image`), and sets the
-  # instance size and extra args (shell, with line continuations, appended to
-  # the runtime's common `docker run` below) for it in `sizes` and `commands`.
-  # A full `run_command` can be given instead of `commands`.
+  # Each model lists its variants: a `runtime` (a key of `var.machine_image`),
+  # an instance `size` and a `command` (runtime args as shell, with line
+  # continuations, starting with the model to load; the runtime's common
+  # `docker run` is wrapped around it). A full `run_command` can be given
+  # instead of `command`.
   models = {
     "google/gemma-4-E2B-it" = {
-      sizes           = { vllm = "g2-standard-4", llamacpp = "g2-standard-4" }
-      spot            = false
-      count           = 0
-      runtime         = "vllm"
-      stop_when_ready = local.vllm_stop
-      commands = {
-        vllm = <<-EOF
-          --tool-call-parser gemma4 \
-          --chat-template examples/tool_chat_template_gemma4.jinja \
-          --reasoning-parser gemma4 \
-          --speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
-        EOF
+      variants = {
+        vllm = {
+          runtime = "vllm"
+          size    = "g2-standard-4"
+          command = <<-EOF
+            google/gemma-4-E2B-it \
+            --tool-call-parser gemma4 \
+            --chat-template examples/tool_chat_template_gemma4.jinja \
+            --reasoning-parser gemma4 \
+            --speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
+          EOF
+        }
         # The repo's mtp-gemma-4-E2B-it-*.gguf drafter is fetched alongside the model
-        llamacpp = <<-EOF
-          -hf ggml-org/gemma-4-E2B-it-GGUF:BF16 \
-          --spec-type draft-mtp --spec-draft-n-max 2
-        EOF
+        llamacpp-bf16 = {
+          runtime = "llamacpp"
+          size    = "g2-standard-4"
+          command = <<-EOF
+            -hf ggml-org/gemma-4-E2B-it-GGUF:BF16 \
+            --spec-type draft-mtp --spec-draft-n-max 2
+          EOF
+        }
       }
     }
     "Qwen/Qwen3.5-9B" = {
-      sizes   = { vllm = "g2-standard-24", llamacpp = "g2-standard-8" }
-      spot    = false
-      count   = 1
-      runtime = "llamacpp"
-      # stop_when_ready = local.vllm_stop
-      commands = {
-        vllm     = <<-EOF
-          --trust-remote-code \
-          --max-model-len 262144 \
-          --reasoning-parser qwen3 \
-          --tool-call-parser qwen3_coder \
-          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-        EOF
-        llamacpp = <<-EOF
-          -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
-          -c 262144 \
-          --no-mmproj -np 1 \
-          --spec-type draft-mtp --spec-draft-n-max 2
-        EOF
+      variants = {
+        vllm = {
+          runtime = "vllm"
+          size    = "g2-standard-24"
+          command = <<-EOF
+            Qwen/Qwen3.5-9B \
+            --trust-remote-code \
+            --max-model-len 262144 \
+            --reasoning-parser qwen3 \
+            --tool-call-parser qwen3_coder \
+            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+          EOF
+        }
+        llamacpp-q5_k_m = {
+          runtime = "llamacpp"
+          size    = "g2-standard-8"
+          command = <<-EOF
+            -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
+            -c 262144 \
+            -np 4 --kv-unified \
+            --no-mmproj \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0 \
+            --spec-type draft-mtp --spec-draft-n-max 2
+          EOF
+        }
       }
     }
     "Qwen/Qwen3.6-27B" = {
-      sizes           = { vllm = "g2-standard-48", llamacpp = "g2-standard-48" }
-      spot            = true
-      count           = 0
-      runtime         = "vllm"
-      stop_when_ready = local.vllm_stop
-      commands = {
-        vllm     = <<-EOF
-          --trust-remote-code \
-          --tool-call-parser qwen3_coder \
-          --reasoning-parser qwen3 \
-          --language-model-only \
-          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-        EOF
-        llamacpp = <<-EOF
-          -hf unsloth/Qwen3.6-27B-MTP-GGUF:BF16 \
-          --no-mmproj -np 1 \
-          --spec-type draft-mtp --spec-draft-n-max 2
-        EOF
+      variants = {
+        vllm = {
+          runtime = "vllm"
+          size    = "g2-standard-48"
+          command = <<-EOF
+            Qwen/Qwen3.6-27B \
+            --trust-remote-code \
+            --tool-call-parser qwen3_coder \
+            --reasoning-parser qwen3 \
+            --language-model-only \
+            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+          EOF
+        }
       }
     }
     "Qwen/Qwen3.6-35B-A3B" = {
-      # ~67G of BF16 weights on one 96G GPU. Only 10/40 layers use full
-      # attention, so a full 262K context needs just ~5G of KV cache.
-      sizes           = { vllm = "g4-standard-48", llamacpp = "g4-standard-48" }
-      spot            = false
-      count           = 0
-      runtime         = "vllm"
-      stop_when_ready = local.vllm_stop
-      commands = {
-        vllm     = <<-EOF
-          --max-model-len 262144 \
-          --reasoning-parser qwen3 \
-          --tool-call-parser qwen3_coder \
-          --language-model-only \
-          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-        EOF
-        llamacpp = <<-EOF
-          -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q5_K_M \
-          -c 262144 \
-          --no-mmproj -np 1 \
-          --spec-type draft-mtp --spec-draft-n-max 2
-        EOF
-      }
-    }
-    "Qwen/Qwen3.6-35B-A3B-FP8" = {
-      # ~36G of block FP8 weights on 2x L4 (48G) is tight, so the context is
-      # halved to leave room for KV cache. Qwen advise at least 128K for thinking.
-      sizes   = { vllm = "g2-standard-24", llamacpp = "g2-standard-24" }
-      spot    = true
-      count   = 0
-      runtime = "vllm"
-      # stop_when_ready  = local.vllm_stop
-      commands = {
-        vllm     = <<-EOF
-          --max-model-len 131072 \
-          --reasoning-parser qwen3 \
-          --tool-call-parser qwen3_coder \
-          --language-model-only \
-          --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-        EOF
-        llamacpp = <<-EOF
-          -hf unsloth/Qwen3.6-35B-A3B-MTP-GGUF:Q8_0 \
-          -c 131072 \
-          --no-mmproj -np 1 \
-          --spec-type draft-mtp --spec-draft-n-max 2
-        EOF
+      variants = {
+        # ~67G of BF16 weights on one 96G GPU. Only 10/40 layers use full
+        # attention, so a full 262K context needs just ~5G of KV cache.
+        vllm = {
+          runtime = "vllm"
+          size    = "g4-standard-48"
+          command = <<-EOF
+            Qwen/Qwen3.6-35B-A3B \
+            --max-model-len 262144 \
+            --reasoning-parser qwen3 \
+            --tool-call-parser qwen3_coder \
+            --language-model-only \
+            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+          EOF
+        }
+        # ~36G of block FP8 weights on 2x L4 (48G) is tight, so the context is
+        # halved to leave room for KV cache. Qwen advise at least 128K for thinking.
+        vllm-fp8 = {
+          runtime = "vllm"
+          size    = "g2-standard-24"
+          command = <<-EOF
+            Qwen/Qwen3.6-35B-A3B-FP8 \
+            --max-model-len 131072 \
+            --reasoning-parser qwen3 \
+            --tool-call-parser qwen3_coder \
+            --language-model-only \
+            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+          EOF
+        }
+        # ~25G of Q5_K_M weights plus ~5G of KV cache for the full 262K context
+        # fits comfortably on 2x L4 (48G).
+        llamacpp-q5_k_m = {
+          runtime = "llamacpp"
+          size    = "g2-standard-24"
+          command = <<-EOF
+            -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q5_K_M \
+            -c 262144 \
+            --no-mmproj \
+            -np 4 --kv-unified \
+            --chat-template-kwargs '{"preserve_thinking":true}' \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0 \
+            --spec-type draft-mtp --spec-draft-n-max 2
+          EOF
+        }
+        # ~37G of Q8_0 weights on 2x L4 (48G) is tight, so the context is halved
+        # to leave room for KV cache.
+        llamacpp-q8_0 = {
+          runtime = "llamacpp"
+          size    = "g2-standard-24"
+          command = <<-EOF
+            -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q8_0 \
+            -c 131072 \
+            --no-mmproj \
+            -np 4 --kv-unified \
+            --chat-template-kwargs '{"preserve_thinking":true}' \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0 \
+            --spec-type draft-mtp --spec-draft-n-max 2
+          EOF
+        }
       }
     }
   }
 
+  # Deployed instances, keyed by the model name they serve (and scallama routes
+  # by). The VM is named after the last path segment of the key.
+  #
+  # Each instance sets the `zone` it runs in. Its region is taken from the zone
+  # and must be a key of `var.region_subnets`.
+  model_instances = {
+    "google/gemma-4-E2B-it" = {
+      model           = "google/gemma-4-E2B-it"
+      variant         = "vllm"
+      zone            = var.zone
+      count           = 0
+      spot            = false
+      # stop_when_ready = local.vllm_stop
+    }
+    "Qwen/Qwen3.5-9B" = {
+      model   = "Qwen/Qwen3.5-9B"
+      variant = "llamacpp-q5_k_m"
+      zone    = var.zone
+      count   = 1
+      spot    = false
+      # stop_when_ready = local.vllm_stop
+    }
+    "Qwen/Qwen3.6-27B" = {
+      model           = "Qwen/Qwen3.6-27B"
+      variant         = "vllm"
+      zone            = var.zone
+      count           = 0
+      spot            = true
+      # stop_when_ready = local.vllm_stop
+    }
+    "Qwen/Qwen3.6-35B-A3B" = {
+      model           = "Qwen/Qwen3.6-35B-A3B"
+      variant         = "llamacpp-q5_k_m"
+      zone            = "us-east4-c"
+      count           = 1
+      spot            = false
+      # stop_when_ready = local.vllm_stop
+    }
+    "Qwen/Qwen3.6-35B-A3B-FP8" = {
+      model   = "Qwen/Qwen3.6-35B-A3B"
+      variant = "vllm-fp8"
+      zone    = var.zone
+      count   = 0
+      spot    = true
+      # stop_when_ready  = local.vllm_stop
+    }
+  }
+
+  instances = {
+    for name, instance in local.model_instances : name => merge(instance, {
+      vm_name = replace(lower(element(split("/", name), length(split("/", name)) - 1)), "/[^a-z0-9-]/", "-")
+      variant = local.models[instance.model].variants[instance.variant]
+      region  = regex("^(.+)-[a-z]$", instance.zone)[0]
+    })
+  }
+  # Regions that have at least one model instance, and so need templates
+  instance_regions = toset([for instance in local.instances : instance.region])
+  active_instances = { for name, instance in local.instances : name => instance if instance.count > 0 }
+
   # llama.cpp splits layers across all GPUs by default, and enables Jinja chat
   # templates (tool calling) and reasoning extraction out of the box.
   run_commands = {
-    for name, model in local.models : name => try(model.run_command, {
+    for name, instance in local.instances : name => try(instance.variant.run_command, {
       vllm     = <<-EOF
         docker run -d --name vllm --gpus all \
           --restart unless-stopped \
           --privileged --ipc=host -p 8000:8000 \
           -e HF_TOKEN \
           -v /mnt/local-ssd/cache:/root/.cache \
-          vllm/vllm-openai:latest ${name} \
-          --tensor-parallel-size ${local.sizes[model.sizes[model.runtime]].gpus} \
-          --enable-auto-tool-choice \
-          ${indent(2, trimspace(model.commands[model.runtime]))}
+          vllm/vllm-openai:latest \
+          ${indent(2, trimspace(instance.variant.command))} \
+          --served-model-name ${name} \
+          --tensor-parallel-size ${local.sizes[instance.variant.size].gpus} \
+          --enable-auto-tool-choice
       EOF
       llamacpp = <<-EOF
         docker run -d --name llama --gpus all \
           --restart unless-stopped \
-          -p 8000:8080 \
+          -p 9931:9931 \
           -e HF_TOKEN \
           -v /mnt/local-ssd/cache:/root/.cache \
           ghcr.io/ggml-org/llama.cpp:server-cuda \
           --alias ${name} \
           -ngl all \
-          ${indent(2, trimspace(model.commands[model.runtime]))}
+          --port 9931 \
+          ${indent(2, trimspace(instance.variant.command))}
       EOF
-    }[model.runtime])
+    }[instance.variant.runtime])
   }
 }
 
@@ -191,11 +284,13 @@ resource "google_compute_network" "vpc" {
   auto_create_subnetworks = false
 }
 
-# Subnetwork in the target region
-resource "google_compute_subnetwork" "subnet" {
-  name          = "${var.instance_name}-subnet"
-  ip_cidr_range = var.region_subnets[var.region]
-  region        = var.region
+# One subnetwork per supported region
+resource "google_compute_subnetwork" "subnets" {
+  for_each = var.region_subnets
+
+  name          = "${var.instance_name}-${each.key}"
+  ip_cidr_range = each.value
+  region        = each.key
   network       = google_compute_network.vpc.id
 }
 
@@ -224,24 +319,31 @@ resource "google_compute_firewall" "allow_egress" {
   direction          = "EGRESS"
 }
 
-# Instance template specifying the machine image, disk size, and Spot VM settings
+# Instance template specifying the machine image, disk size, and scheduling
 resource "google_compute_instance_template" "templates" {
-  # One template per size and machine image variant, e.g. "g2-standard-24-vllm"
-  for_each = merge([
-    for size, config in local.sizes : {
-      for variant, image in var.machine_image : "${size}-${variant}" => merge(config, {
-        machine_type = size
-        image        = image
-      })
-    }
-  ]...)
+  # One template per region, size and runtime machine image, e.g.
+  # "europe-west4-g2-standard-24-vllm". A template's subnetwork is regional, so
+  # templates can't be shared across regions.
+  for_each = merge(flatten([
+    for region in local.instance_regions : [
+      for size, config in local.sizes : {
+        for runtime, image in var.machine_image : "${region}-${size}-${runtime}" => merge(config, {
+          region       = region
+          machine_type = size
+          image        = image
+          name_prefix  = "${size}-${runtime}"
+        })
+      }
+    ]
+  ])...)
 
-  name_prefix  = each.key
+  name_prefix  = each.value.name_prefix
   machine_type = each.value.machine_type
 
   labels = {
-    gpus  = tostring(each.value.gpus)
-    disks = tostring(each.value.disks)
+    gpus   = tostring(each.value.gpus)
+    disks  = tostring(each.value.disks)
+    region = each.value.region
   }
 
   // Disk configuration
@@ -267,19 +369,16 @@ resource "google_compute_instance_template" "templates" {
 
   // Network interface
   network_interface {
-    subnetwork = google_compute_subnetwork.subnet.id
+    subnetwork = google_compute_subnetwork.subnets[each.value.region].id
     access_config {
       // Assigns an ephemeral public IP for external access
     }
   }
 
-  // Spot VM scheduling options
+  // Scheduling defaults, Spot is set per instance
   scheduling {
-    preemptible                 = lookup(each.value, "spot", false)
-    provisioning_model          = lookup(each.value, "spot", false) ? "SPOT" : "STANDARD"
-    instance_termination_action = lookup(each.value, "spot", false) ? "STOP" : null
-    on_host_maintenance         = "TERMINATE"
-    automatic_restart           = false
+    on_host_maintenance = "TERMINATE"
+    automatic_restart   = false
   }
 
   lifecycle {
@@ -289,10 +388,17 @@ resource "google_compute_instance_template" "templates" {
 
 # Dedicated service account per VM
 resource "google_service_account" "vm" {
-  for_each = { for k, v in local.models : k => v if v.count > 0 }
+  for_each = local.active_instances
 
-  account_id   = replace(lower(split("/", each.key)[1]), ".", "-")
+  account_id   = each.value.vm_name
   display_name = "Scallama inference VM for ${each.key}"
+
+  lifecycle {
+    precondition {
+      condition     = length(each.value.vm_name) >= 6 && length(each.value.vm_name) <= 30
+      error_message = "VM name \"${each.value.vm_name}\" must be 6-30 characters to name its service account."
+    }
+  }
 }
 
 # APIs required by this deployment
@@ -320,11 +426,19 @@ resource "google_secret_manager_secret_iam_member" "hf_token" {
 
 # Compute Instance created from the template
 resource "google_compute_instance_from_template" "vm" {
-  for_each = { for k, v in local.models : k => v if v.count > 0 }
+  for_each = local.active_instances
 
-  name                     = replace(lower(split("/", each.key)[1]), ".", "-")
-  zone                     = var.zone
-  source_instance_template = google_compute_instance_template.templates["${each.value.sizes[each.value.runtime]}-${each.value.runtime}"].id
+  name                     = each.value.vm_name
+  zone                     = each.value.zone
+  source_instance_template = google_compute_instance_template.templates["${each.value.region}-${each.value.variant.size}-${each.value.variant.runtime}"].id
+
+  scheduling {
+    preemptible                 = each.value.spot
+    provisioning_model          = each.value.spot ? "SPOT" : "STANDARD"
+    instance_termination_action = each.value.spot ? "STOP" : null
+    on_host_maintenance         = "TERMINATE"
+    automatic_restart           = false
+  }
 
   service_account {
     email  = google_service_account.vm[each.key].email
@@ -333,6 +447,17 @@ resource "google_compute_instance_from_template" "vm" {
 
   # The token is read on first boot, so access must be granted beforehand
   depends_on = [google_secret_manager_secret_iam_member.hf_token]
+
+  lifecycle {
+    precondition {
+      condition     = contains(keys(var.region_subnets), each.value.region)
+      error_message = "Region \"${each.value.region}\" for \"${each.key}\" has no entry in var.region_subnets."
+    }
+    precondition {
+      condition     = each.value.count <= 1
+      error_message = "count > 1 is not supported for \"${each.key}\", add another model_instances entry instead."
+    }
+  }
 
   metadata_startup_script = <<-EOF
     touch /run/startup-running

@@ -14,7 +14,7 @@ output "public_ip" {
 }
 
 output "start_commands" {
-  description = "Rendered vLLM start command for each model"
+  description = "Rendered start command for each model instance"
   value       = local.run_commands
 }
 
@@ -23,25 +23,25 @@ output "vpc_name" {
   value       = google_compute_network.vpc.name
 }
 
-output "subnet_name" {
-  description = "The name of the subnetwork"
-  value       = google_compute_subnetwork.subnet.name
+output "subnet_names" {
+  description = "The names of the subnetworks, keyed by region"
+  value       = { for region, subnet in google_compute_subnetwork.subnets : region => subnet.name }
 }
 
 output "scallama_config" {
   description = "Scallama configuration"
   value = {
     models = {
-      for model_name, model_config in local.models : model_name => {
+      for name, instance in local.instances : name => {
         idle_timeout      = "2m"
-        health_check_path = try(model_config.stop_when_ready.health_check_path, "/health")
+        health_check_path = try(instance.stop_when_ready.health_check_path, "/health")
         options = {
-          baseURL = "http://{{public_ips.${replace(lower(split("/", model_name)[1]), ".", "-")}}}:8000/"
+          baseURL = "http://{{public_ips.${instance.vm_name}}}:8000/"
         }
         backend = {
           type           = "gcp_compute_engine"
-          instance_names = [replace(lower(split("/", model_name)[1]), ".", "-")]
-          zone           = var.zone
+          instance_names = [instance.vm_name]
+          zone           = instance.zone
           project_id     = var.project_id
         }
       }
