@@ -515,6 +515,7 @@ locals {
       for i in range(instance.count) : "${name}#${i}" => {
         name  = name
         index = i
+        zone  = instance.zone
       }
     }
   ]...)
@@ -523,7 +524,10 @@ locals {
 data "google_compute_instance" "mig" {
   for_each = local.mig_instance_keys
 
-  self_link = local.mig_instance_links[each.value.name][each.value.index]
+  # The data source doesn't fill in `name` and `zone` when given a self link,
+  # so pass them explicitly.
+  name = element(split("/", local.mig_instance_links[each.value.name][each.value.index]), -1)
+  zone = each.value.zone
 }
 
 locals {
