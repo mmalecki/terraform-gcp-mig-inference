@@ -566,6 +566,13 @@ resource "google_compute_region_instance_group_manager" "mig" {
     max_unavailable_fixed        = length(local.mig_zones[each.key])
   }
 
+  # Scallama stops idle instances and Spot preemption stops them too. By default
+  # the group treats a VM stopped outside its control as failed and recreates
+  # it, booting it straight back up from a fresh disk.
+  instance_lifecycle_policy {
+    default_action_on_failure = "DO_NOTHING"
+  }
+
   # Instances must exist for the data sources below to read their addresses
   wait_for_instances = true
 
