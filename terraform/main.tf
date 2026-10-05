@@ -53,7 +53,7 @@ locals {
             --tool-call-parser gemma4 \
             --chat-template examples/tool_chat_template_gemma4.jinja \
             --reasoning-parser gemma4 \
-            --speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
+            #--speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
           EOF
         }
         # The repo's mtp-gemma-4-E2B-it-*.gguf drafter is fetched alongside the model
@@ -62,7 +62,7 @@ locals {
           size    = "g2-standard-4"
           command = <<-EOF
             -hf ggml-org/gemma-4-E2B-it-GGUF:BF16 \
-            --spec-type draft-mtp --spec-draft-n-max 2
+              #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
       }
@@ -78,7 +78,7 @@ locals {
             --max-model-len 262144 \
             --reasoning-parser qwen3 \
             --tool-call-parser qwen3_coder \
-            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
           EOF
         }
         llamacpp-q5_k_m = {
@@ -94,7 +94,7 @@ locals {
             --top-p 0.95 \
             --min-p 0 \
             --presence-penalty 0.0 --repeat-penalty 1.0 \
-            --spec-type draft-mtp --spec-draft-n-max 2
+              #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
         llamacpp-q5_k_m-multi = {
@@ -110,7 +110,7 @@ locals {
             --top-p 0.95 \
             --min-p 0 \
             --presence-penalty 0.0 --repeat-penalty 1.0 \
-            --spec-type draft-mtp --spec-draft-n-max 2
+              #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
       }
@@ -126,7 +126,7 @@ locals {
             --tool-call-parser qwen3_coder \
             --reasoning-parser qwen3 \
             --language-model-only \
-            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
           EOF
         }
       }
@@ -144,7 +144,7 @@ locals {
             --reasoning-parser qwen3 \
             --tool-call-parser qwen3_coder \
             --language-model-only \
-            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
           EOF
         }
         # ~36G of block FP8 weights on 2x L4 (48G) is tight, so the context is
@@ -158,7 +158,7 @@ locals {
             --reasoning-parser qwen3 \
             --tool-call-parser qwen3_coder \
             --language-model-only \
-            --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
           EOF
         }
         # ~25G of Q5_K_M weights plus ~5G of KV cache for the full 262K context
@@ -177,7 +177,7 @@ locals {
             --top-p 0.95 \
             --min-p 0 \
             --presence-penalty 0.0 --repeat-penalty 1.0 \
-            --spec-type draft-mtp --spec-draft-n-max 2
+              #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
         # ~37G of Q8_0 weights on 2x L4 (48G) is tight, so the context is halved
@@ -196,7 +196,7 @@ locals {
             --top-p 0.95 \
             --min-p 0 \
             --presence-penalty 0.0 --repeat-penalty 1.0 \
-            --spec-type draft-mtp --spec-draft-n-max 2
+              #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
       }
