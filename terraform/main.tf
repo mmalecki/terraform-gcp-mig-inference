@@ -210,6 +210,10 @@ locals {
   # `var.region_subnets`. Its group spreads instances across the zones of the
   # region that offer the instance's machine type. Set `zones` (a list of zone
   # names) to use exactly those zones instead.
+  #
+  # Set `update_type = "OPPORTUNISTIC"` (for bench days) to apply template
+  # changes only when instances are recreated anyway, instead of recreating
+  # them all at once mid-run.
   model_instances = {
     "google/gemma-4-E2B-it" = {
       model           = "google/gemma-4-E2B-it"
@@ -220,11 +224,12 @@ locals {
       # stop_when_ready = local.vllm_stop
     }
     "Qwen/Qwen3.5-9B" = {
-      model   = "Qwen/Qwen3.5-9B"
-      region  = "us-central1"
-      variant = "llamacpp-q5_k_m-multi"
-      count   = 1
-      spot    = true
+      model       = "Qwen/Qwen3.5-9B"
+      region      = "us-central1"
+      variant     = "llamacpp-q5_k_m-multi"
+      count       = 1
+      spot        = true
+      update_type = "OPPORTUNISTIC"
       # stop_when_ready = local.vllm_stop
     }
     "Qwen/Qwen3.6-27B" = {
@@ -260,6 +265,12 @@ locals {
     })
   }
   active_instances = { for name, instance in local.instances : name => instance if instance.count > 0 }
+
+  # Port each runtime serves on, as published by its `docker run` below
+  runtime_ports = {
+    vllm     = 8000
+    llamacpp = 9931
+  }
 
   # llama.cpp splits layers across all GPUs by default, and enables Jinja chat
   # templates (tool calling) and reasoning extraction out of the box.
@@ -332,6 +343,39 @@ resource "google_compute_firewall" "allow_egress" {
 
   destination_ranges = ["0.0.0.0/0"]
   direction          = "EGRESS"
+}
+
+# Google's health check probers. Ingress is otherwise limited to the client IP,
+# so without this every VM fails its checks and gets recreated in a loop.
+resource "google_compute_firewall" "allow_health_checks" {
+  name    = "${var.instance_name}-allow-health-checks"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = [for port in values(local.runtime_ports) : tostring(port)]
+  }
+
+  source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
+}
+
+# Health check per active model instance. Both runtimes answer 503 on /health
+# while loading the model and 200 once ready (also when every slot is busy).
+# 6 x 30s = 3 minutes unhealthy before a repair: enough for Docker to restart a
+# crashed server from the cached model.
+resource "google_compute_health_check" "mig" {
+  for_each = local.active_instances
+
+  name                = "${each.value.vm_name}-health"
+  check_interval_sec  = 30
+  timeout_sec         = 10
+  healthy_threshold   = 1
+  unhealthy_threshold = 6
+
+  http_health_check {
+    port         = local.runtime_ports[each.value.variant.runtime]
+    request_path = "/health"
+  }
 }
 
 # Instance template per active model instance. The template carries everything
@@ -557,8 +601,10 @@ resource "google_compute_region_instance_group_manager" "mig" {
   # a regional group must be 0 or at least the number of zones, and percentages
   # need a group of at least 10. RECREATE keeps instance names across
   # replacements, and the ANY distribution shape needs redistribution off.
+  # OPPORTUNISTIC (see `update_type`) leaves running instances on their old
+  # template until they're recreated for another reason.
   update_policy {
-    type                         = "PROACTIVE"
+    type                         = try(each.value.update_type, "PROACTIVE")
     minimal_action               = "REPLACE"
     replacement_method           = "RECREATE"
     instance_redistribution_type = "NONE"
@@ -566,15 +612,27 @@ resource "google_compute_region_instance_group_manager" "mig" {
     max_unavailable_fixed        = length(local.mig_zones[each.key])
   }
 
-  # Scallama stops idle instances and Spot preemption stops them too. By default
-  # the group treats a VM stopped outside its control as failed and recreates
-  # it, booting it straight back up from a fresh disk.
+  # Health is ignored for 10 minutes after a VM is created, recreated or
+  # restarted; a fresh VM measured healthy 2m39s after start, model download
+  # included.
+  auto_healing_policies {
+    health_check      = google_compute_health_check.mig[each.key].id
+    initial_delay_sec = 600
+  }
+
+  # Repair instances failing their health check, and ones stopped outside the
+  # group (Spot preemption, but also Scallama stopping idle instances) by
+  # recreating them. Repairs keep the instance's current template.
   instance_lifecycle_policy {
-    default_action_on_failure = "DO_NOTHING"
+    default_action_on_failure = "REPAIR"
+    force_update_on_repair    = "NO"
   }
 
   # Instances must exist for the data sources below to read their addresses
   wait_for_instances = true
+
+  # Probes must get through before autohealing starts judging instances
+  depends_on = [google_compute_firewall.allow_health_checks]
 
   lifecycle {
     precondition {
