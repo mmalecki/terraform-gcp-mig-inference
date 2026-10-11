@@ -283,7 +283,7 @@ locals {
           -p 9931:9931 \
           -e HF_TOKEN \
           -v /mnt/local-ssd/cache:/root/.cache \
-          ghcr.io/ggml-org/llama.cpp:server-cuda \
+          ghcr.io/ggml-org/llama.cpp:server-cuda-b11429 \
           --alias ${name} \
           -ngl all \
           --port 9931 \
