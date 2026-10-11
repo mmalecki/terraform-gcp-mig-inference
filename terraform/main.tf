@@ -115,6 +115,55 @@ locals {
         }
       }
     }
+    # Built on Qwen3.5, served with the model card's recommended sampling for
+    # precise coding tasks. The model ships no generation_config.json, so vLLM
+    # is given the sampling defaults explicitly.
+    "ornith-ai/Ornith-1.5-9B" = {
+      variants = {
+        vllm = {
+          runtime = "vllm"
+          size    = "g2-standard-24"
+          command = <<-EOF
+            ornith-ai/Ornith-1.5-9B \
+            --trust-remote-code \
+            --max-model-len 262144 \
+            --reasoning-parser qwen3 \
+            --tool-call-parser qwen3_xml \
+            --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
+          EOF
+        }
+        llamacpp-q5_k_m = {
+          runtime = "llamacpp"
+          size    = "g2-standard-8"
+          command = <<-EOF
+            -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
+            -c 262144 \
+            -np 4 --kv-unified \
+            --no-mmproj \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0
+          EOF
+        }
+        llamacpp-q5_k_m-multi = {
+          runtime = "llamacpp"
+          size    = "g4-standard-48"
+          command = <<-EOF
+            -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
+            -c 262144 \
+            -np 8 --kv-unified \
+            --no-mmproj \
+            --temp 0.6 \
+            --top-k 20 \
+            --top-p 0.95 \
+            --min-p 0 \
+            --presence-penalty 0.0 --repeat-penalty 1.0
+          EOF
+        }
+      }
+    }
     "Qwen/Qwen3.6-27B" = {
       variants = {
         vllm = {
@@ -221,6 +270,14 @@ locals {
     }
     "Qwen/Qwen3.5-9B" = {
       model   = "Qwen/Qwen3.5-9B"
+      region  = "us-central1"
+      variant = "llamacpp-q5_k_m-multi"
+      count   = 1
+      spot    = true
+      # stop_when_ready = local.vllm_stop
+    }
+    "ornith-ai/Ornith-1.5-9B" = {
+      model   = "ornith-ai/Ornith-1.5-9B"
       region  = "us-central1"
       variant = "llamacpp-q5_k_m-multi"
       count   = 1
