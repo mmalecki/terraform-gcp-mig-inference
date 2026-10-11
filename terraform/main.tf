@@ -286,6 +286,7 @@ locals {
           ghcr.io/ggml-org/llama.cpp:server-cuda-b11429 \
           --alias ${name} \
           -ngl all \
+          --metrics \
           --port 9931 \
           ${indent(2, trimspace(instance.variant.command))}
       EOF
