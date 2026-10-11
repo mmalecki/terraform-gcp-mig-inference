@@ -152,8 +152,8 @@ locals {
           size    = "g4-standard-48"
           command = <<-EOF
             -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
-            -c 262144 \
-            -np 8 --kv-unified \
+            -c 393216 \
+            -np 5 --kv-unified \
             --no-mmproj \
             --temp 0.6 \
             --top-k 20 \
