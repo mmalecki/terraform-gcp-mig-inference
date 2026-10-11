@@ -492,8 +492,12 @@ resource "google_compute_instance_template" "templates" {
     systemctl mask cloud-init-local.service snapd.service snapd.socket snapd.seeded.service
 EOF
 
-  # The token is read on first boot, so access must be granted beforehand
-  depends_on = [google_secret_manager_secret_iam_member.hf_token]
+  # The token is read on first boot, and logs and metrics are written from the
+  # first boot onwards, so access must be granted beforehand
+  depends_on = [
+    google_secret_manager_secret_iam_member.hf_token,
+    google_project_iam_member.vm_observability,
+  ]
 
   lifecycle {
     create_before_destroy = true
@@ -523,6 +527,8 @@ resource "google_service_account" "vm" {
 resource "google_project_service" "services" {
   for_each = toset([
     "secretmanager.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
   ])
 
   project            = var.project_id
@@ -538,6 +544,33 @@ resource "google_secret_manager_secret_iam_member" "hf_token" {
   secret_id = "hf-token"
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${each.value.email}"
+
+  depends_on = [google_project_service.services]
+}
+
+locals {
+  # Roles a VM needs to write its logs and metrics
+  vm_observability_roles = [
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+  ]
+}
+
+# Grant each VM's service account the writer roles for Cloud Logging and Cloud
+# Monitoring. They are bound on the project because that is where their
+# permissions take effect: bound on the service account itself they grant nothing.
+resource "google_project_iam_member" "vm_observability" {
+  for_each = {
+    for pair in setproduct(keys(google_service_account.vm), local.vm_observability_roles) :
+    "${pair[0]}|${pair[1]}" => {
+      vm   = pair[0]
+      role = pair[1]
+    }
+  }
+
+  project = var.project_id
+  role    = each.value.role
+  member  = "serviceAccount:${google_service_account.vm[each.value.vm].email}"
 
   depends_on = [google_project_service.services]
 }
