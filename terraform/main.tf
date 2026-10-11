@@ -128,8 +128,7 @@ locals {
             --trust-remote-code \
             --max-model-len 262144 \
             --reasoning-parser qwen3 \
-            --tool-call-parser qwen3_xml \
-            --override-generation-config '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}'
+            --tool-call-parser qwen3_xml
           EOF
         }
         llamacpp-q5_k_m = {
