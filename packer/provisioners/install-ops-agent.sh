@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# Install Google Cloud Ops Agent, pinned, with GPU (NVML) host metrics and a
-# Prometheus scrape of llama-server's /metrics. See ops-agent-poc.md.
+# Install Google Cloud Ops Agent, pinned, with GPU (NVML) host metrics and
+# Prometheus scrapes of llama-server's and dcgm-exporter's /metrics. See
+# ops-agent-poc.md.
 #
 # Must run as root. The config is instance-agnostic (localhost only); the agent
 # reads instance metadata itself when it starts, so nothing needs to run at boot.
@@ -56,10 +57,22 @@ metrics:
             metrics_path: /metrics
             static_configs:
               - targets: ["localhost:9931"]
+    dcgm_exporter:
+      # GPU profiling metrics from nvidia-dcgm-exporter (install-dcgm.sh)
+      type: prometheus
+      config:
+        scrape_configs:
+          - job_name: dcgm-exporter
+            scrape_interval: 30s
+            metrics_path: /metrics
+            static_configs:
+              - targets: ["localhost:9400"]
   service:
     pipelines:
       llama_server:
         receivers: [llama_server]
+      dcgm_exporter:
+        receivers: [dcgm_exporter]
 EOF
 chmod 0644 /etc/google-cloud-ops-agent/config.yaml
 
