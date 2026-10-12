@@ -43,30 +43,6 @@ locals {
   # `docker run` is wrapped around it). A full `run_command` can be given
   # instead of `command`.
   models = {
-    "google/gemma-4-E2B-it" = {
-      variants = {
-        vllm = {
-          runtime = "vllm"
-          size    = "g2-standard-4"
-          command = <<-EOF
-            google/gemma-4-E2B-it \
-            --tool-call-parser gemma4 \
-            --chat-template examples/tool_chat_template_gemma4.jinja \
-            --reasoning-parser gemma4 \
-            #--speculative-config '{"method":"mtp","model":"google/gemma-4-E2B-it-assistant","num_speculative_tokens":2}'
-          EOF
-        }
-        # The repo's mtp-gemma-4-E2B-it-*.gguf drafter is fetched alongside the model
-        llamacpp-bf16 = {
-          runtime = "llamacpp"
-          size    = "g2-standard-4"
-          command = <<-EOF
-            -hf ggml-org/gemma-4-E2B-it-GGUF:BF16 \
-              #--spec-type draft-mtp --spec-draft-n-max 2
-          EOF
-        }
-      }
-    }
     "Qwen/Qwen3.5-9B" = {
       variants = {
         vllm = {
@@ -163,46 +139,15 @@ locals {
         }
       }
     }
-    "Qwen/Qwen3.6-27B" = {
+    "Qwen/Qwen3.6-35B-A3B" = {
       variants = {
-        vllm = {
+        # Plenty of room.
+        vllm-fp8 = {
           runtime = "vllm"
           size    = "g2-standard-48"
           command = <<-EOF
-            Qwen/Qwen3.6-27B \
-            --trust-remote-code \
-            --tool-call-parser qwen3_coder \
-            --reasoning-parser qwen3 \
-            --language-model-only \
-              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-          EOF
-        }
-      }
-    }
-    "Qwen/Qwen3.6-35B-A3B" = {
-      variants = {
-        # ~67G of BF16 weights on one 96G GPU. Only 10/40 layers use full
-        # attention, so a full 262K context needs just ~5G of KV cache.
-        vllm = {
-          runtime = "vllm"
-          size    = "g4-standard-48"
-          command = <<-EOF
-            Qwen/Qwen3.6-35B-A3B \
-            --max-model-len 262144 \
-            --reasoning-parser qwen3 \
-            --tool-call-parser qwen3_coder \
-            --language-model-only \
-              #--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-          EOF
-        }
-        # ~36G of block FP8 weights on 2x L4 (48G) is tight, so the context is
-        # halved to leave room for KV cache. Qwen advise at least 128K for thinking.
-        vllm-fp8 = {
-          runtime = "vllm"
-          size    = "g2-standard-24"
-          command = <<-EOF
             Qwen/Qwen3.6-35B-A3B-FP8 \
-            --max-model-len 131072 \
+            --max-model-len 262144 \
             --reasoning-parser qwen3 \
             --tool-call-parser qwen3_coder \
             --language-model-only \
@@ -218,26 +163,7 @@ locals {
             -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q5_K_M \
             -c 262144 \
             --no-mmproj \
-            -np 4 --kv-unified \
-            --chat-template-kwargs '{"preserve_thinking":true}' \
-            --temp 0.6 \
-            --top-k 20 \
-            --top-p 0.95 \
-            --min-p 0 \
-            --presence-penalty 0.0 --repeat-penalty 1.0 \
-              #--spec-type draft-mtp --spec-draft-n-max 2
-          EOF
-        }
-        # ~37G of Q8_0 weights on 2x L4 (48G) is tight, so the context is halved
-        # to leave room for KV cache.
-        llamacpp-q8_0 = {
-          runtime = "llamacpp"
-          size    = "g2-standard-24"
-          command = <<-EOF
-            -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q8_0 \
-            -c 131072 \
-            --no-mmproj \
-            -np 4 --kv-unified \
+            -np 5 --kv-unified \
             --chat-template-kwargs '{"preserve_thinking":true}' \
             --temp 0.6 \
             --top-k 20 \
@@ -259,19 +185,11 @@ locals {
   # region that offer the instance's machine type. Set `zones` (a list of zone
   # names) to use exactly those zones instead.
   model_instances = {
-    "google/gemma-4-E2B-it" = {
-      model           = "google/gemma-4-E2B-it"
-      variant         = "vllm"
-      region          = var.region
-      count           = 0
-      spot            = false
-      # stop_when_ready = local.vllm_stop
-    }
     "Qwen/Qwen3.5-9B" = {
       model   = "Qwen/Qwen3.5-9B"
       region  = "us-central1"
       variant = "llamacpp-q5_k_m-multi"
-      count   = 1
+      count   = 0
       spot    = true
       # stop_when_ready = local.vllm_stop
     }
@@ -279,33 +197,17 @@ locals {
       model   = "ornith-ai/Ornith-1.5-9B"
       region  = "us-central1"
       variant = "llamacpp-q5_k_m-multi"
-      count   = 1
+      count   = 0
       spot    = true
-      # stop_when_ready = local.vllm_stop
-    }
-    "Qwen/Qwen3.6-27B" = {
-      model           = "Qwen/Qwen3.6-27B"
-      variant         = "vllm"
-      region          = var.region
-      count           = 0
-      spot            = true
       # stop_when_ready = local.vllm_stop
     }
     "Qwen/Qwen3.6-35B-A3B" = {
       model           = "Qwen/Qwen3.6-35B-A3B"
       variant         = "llamacpp-q5_k_m"
-      region          = "us-east4"
+      region          = "us-central1"
       count           = 0
       spot            = false
       # stop_when_ready = local.vllm_stop
-    }
-    "Qwen/Qwen3.6-35B-A3B-FP8" = {
-      model   = "Qwen/Qwen3.6-35B-A3B"
-      variant = "vllm-fp8"
-      region  = var.region
-      count   = 0
-      spot    = true
-      # stop_when_ready  = local.vllm_stop
     }
   }
 
