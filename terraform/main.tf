@@ -336,6 +336,7 @@ locals {
       llamacpp = <<-EOF
         docker run -d --name llama --gpus all \
           --restart unless-stopped \
+          --health-cmd 'curl -f http://localhost:9931/health' \
           -p 9931:9931 \
           -e HF_TOKEN \
           -v /mnt/local-ssd/cache:/root/.cache \
