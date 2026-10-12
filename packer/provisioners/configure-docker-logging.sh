@@ -17,10 +17,10 @@ sudo mkdir -p /etc/docker
 sudo test -s "$DAEMON_JSON" || echo '{}' | sudo tee "$DAEMON_JSON" > /dev/null
 
 tmp=$(mktemp)
-sudo jq '. + {
+sudo cat "$DAEMON_JSON" | jq '. + {
   "log-driver": "json-file",
   "log-opts": {"max-size": "100m", "max-file": "2"}
-}' "$DAEMON_JSON" > "$tmp"
+}' > "$tmp"
 sudo install -m 0644 "$tmp" "$DAEMON_JSON"
 rm "$tmp"
 
