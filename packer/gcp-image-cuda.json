@@ -5,7 +5,8 @@
     "cuda_drivers_version": "",
     "node_major_version": "24",
     "image_version": "",
-    "gcp_project_id": ""
+    "gcp_project_id": "",
+    "ops_agent_version": "2.72.0~ubuntu26.04"
   },
   "builders": [
     {
@@ -60,6 +61,12 @@
         "sudo docker pull vllm/vllm-openai:latest",
         "sudo docker pull ghcr.io/ggml-org/llama.cpp:server-cuda"
       ]
+    },
+    {
+      "type": "shell",
+      "environment_vars": ["OPS_AGENT_VERSION={{user `ops_agent_version`}}"],
+      "execute_command": "chmod +x {{ .Path }}; {{ .Vars }} sudo -E bash '{{ .Path }}'",
+      "script": "provisioners/install-ops-agent.sh"
     }
   ]
 }
