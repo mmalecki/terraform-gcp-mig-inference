@@ -1,0 +1,4 @@
+{
+  "docker_version": "5:29.5.3-1~ubuntu.26.04~resolute",
+  "cuda_drivers_version": "595"
+}
