@@ -56,6 +56,10 @@
     },
     {
       "type": "shell",
+      "script": "provisioners/configure-docker-logging.sh"
+    },
+    {
+      "type": "shell",
       "inline": [
         "sudo systemctl start docker.service",
         "sudo docker pull vllm/vllm-openai:latest",
