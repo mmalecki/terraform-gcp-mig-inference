@@ -11,23 +11,18 @@ set -e
 
 readonly DAEMON_JSON=/etc/docker/daemon.json
 
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq
+
 sudo mkdir -p /etc/docker
-sudo python3 - "$DAEMON_JSON" <<'EOF'
-import json, os, sys
+sudo test -s "$DAEMON_JSON" || echo '{}' | sudo tee "$DAEMON_JSON" > /dev/null
 
-path = sys.argv[1]
-config = {}
-if os.path.exists(path) and os.path.getsize(path) > 0:
-    with open(path) as f:
-        config = json.load(f)
-
-config["log-driver"] = "json-file"
-config["log-opts"] = {"max-size": "100m", "max-file": "2"}
-
-with open(path, "w") as f:
-    json.dump(config, f, indent=4)
-    f.write("\n")
-EOF
+tmp=$(mktemp)
+sudo jq '. + {
+  "log-driver": "json-file",
+  "log-opts": {"max-size": "100m", "max-file": "2"}
+}' "$DAEMON_JSON" > "$tmp"
+sudo install -m 0644 "$tmp" "$DAEMON_JSON"
+rm "$tmp"
 
 sudo cat "$DAEMON_JSON"
 sudo dockerd --validate --config-file "$DAEMON_JSON"
