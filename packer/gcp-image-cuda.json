@@ -74,7 +74,7 @@
       "inline": [
         "sudo systemctl start docker.service",
         "sudo docker pull vllm/vllm-openai:latest",
-        "sudo docker pull ghcr.io/ggml-org/llama.cpp:server-cuda"
+        "sudo docker pull ghcr.io/ggml-org/llama.cpp:server-cuda-b11429"
       ]
     },
     {
