@@ -4,17 +4,7 @@ locals {
     health_check_port = 8000
   }
   sizes = {
-    "g2-standard-4" = {
-      disks = 1
-      gpus  = 1
-      vram  = 24 # 1x L4
-    }
     "g2-standard-8" = {
-      disks = 1
-      gpus  = 1
-      vram  = 24 # 1x L4
-    }
-    "g2-standard-16" = {
       disks = 1
       gpus  = 1
       vram  = 24 # 1x L4
@@ -23,11 +13,6 @@ locals {
       disks = 2
       gpus  = 2
       vram  = 48 # 2x L4
-    }
-    "g2-standard-48" = {
-      disks = 4
-      gpus  = 4
-      vram  = 96 # 4x L4
     }
     "g4-standard-48" = {
       disk_type = "hyperdisk-balanced"
@@ -148,7 +133,7 @@ locals {
     }
     "Qwen/Qwen3.6-35B-A3B" = {
       variants = {
-        # Plenty of room on 4x L4 (96G).
+        # Plenty of room on 1x RTX PRO 6000 (96G).
         vllm-fp8 = {
           runtime  = "vllm"
           vram_min = 54 # 37.5G FP8 weights + 5.4G KV (262K) + overhead, / 0.9
