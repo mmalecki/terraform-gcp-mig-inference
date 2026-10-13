@@ -75,7 +75,7 @@ locals {
         }
         llamacpp-q5_k_m-multi = {
           runtime = "llamacpp"
-          size    = "g4-standard-48"
+          size    = "g2-standard-48"
           command = <<-EOF
             -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
             -c 393216 \
@@ -124,7 +124,7 @@ locals {
         }
         llamacpp-q5_k_m-multi = {
           runtime = "llamacpp"
-          size    = "g4-standard-48"
+          size    = "g2-standard-48"
           command = <<-EOF
             -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
             -c 393216 \
@@ -169,7 +169,7 @@ locals {
             --top-k 20 \
             --top-p 0.95 \
             --min-p 0 \
-            --presence-penalty 0.0 --repeat-penalty 1.0 \
+            --presence-penalty 1.5 --repeat-penalty 1.0 \
               #--spec-type draft-mtp --spec-draft-n-max 2
           EOF
         }
