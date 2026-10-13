@@ -1,7 +1,7 @@
 output "instance_addresses" {
-  description = "Addresses of the instances in each model's managed instance group, keyed by model"
+  description = "Addresses of the VMs in each instance's managed instance group, keyed by instance"
   value = {
-    for name, vms in local.model_vms : name => {
+    for name, vms in local.instance_vms : name => {
       names       = [for vm in vms : vm.name]
       public_ips  = [for vm in vms : vm.network_interface[0].access_config[0].nat_ip]
       private_ips = [for vm in vms : vm.network_interface[0].network_ip]
@@ -10,12 +10,12 @@ output "instance_addresses" {
 }
 
 output "instance_groups" {
-  description = "Self-link of each model's managed instance group"
+  description = "Self-link of each instance's managed instance group"
   value       = { for name, mig in google_compute_region_instance_group_manager.mig : name => mig.instance_group }
 }
 
 output "start_commands" {
-  description = "Rendered start command for each model instance"
+  description = "Rendered start commands for each instance"
   value       = local.run_commands
 }
 
@@ -33,16 +33,16 @@ output "scallama_config" {
   description = "Scallama configuration"
   value = {
     models = {
-      for name, instance in local.instances : name => {
+      for name, m in local.hosted_models : name => {
         idle_timeout      = "2m"
-        health_check_path = try(instance.stop_when_ready.health_check_path, "/health")
+        health_check_path = try(local.resolved_instances[m.instance].stop_when_ready.health_check_path, "/health")
         options = {
-          baseURL = "http://{{public_ips.${try(local.first_vm[name].name, instance.vm_name)}}}:8000/"
+          baseURL = "http://{{public_ips.${try(local.first_vm[m.instance].name, m.instance)}}}:${m.port}/"
         }
         backend = {
           type           = "gcp_compute_engine"
-          instance_names = [try(local.first_vm[name].name, instance.vm_name)]
-          zone           = try(local.first_vm[name].zone, null)
+          instance_names = [try(local.first_vm[m.instance].name, m.instance)]
+          zone           = try(local.first_vm[m.instance].zone, null)
           project_id     = var.project_id
         }
       }

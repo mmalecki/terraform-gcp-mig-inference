@@ -7,48 +7,55 @@ locals {
     "g2-standard-4" = {
       disks = 1
       gpus  = 1
-      # vram = 24G (1x L4)
+      vram  = 24 # 1x L4
     }
     "g2-standard-8" = {
       disks = 1
       gpus  = 1
-      # vram = 24G (1x L4)
+      vram  = 24 # 1x L4
     }
     "g2-standard-16" = {
       disks = 1
       gpus  = 1
-      # vram = 24G (1x L4)
+      vram  = 24 # 1x L4
     }
     "g2-standard-24" = {
       disks = 2
       gpus  = 2
-      # vram = 48G (2x L4)
+      vram  = 48 # 2x L4
     }
     "g2-standard-48" = {
       disks = 4
       gpus  = 4
-      # vram = 96G (4x L4)
+      vram  = 96 # 4x L4
     }
     "g4-standard-48" = {
       disk_type = "hyperdisk-balanced"
       disks     = 4
       gpus      = 1
-      # vram = 96G (1x RTX PRO 6000)
+      vram      = 96 # 1x RTX PRO 6000
     }
   }
 
   # Each model lists its variants: a `runtime` (a key of `var.machine_image`),
-  # an instance `size` and a `command` (runtime args as shell, with line
+  # a `vram_min` and a `command` (runtime args as shell, with line
   # continuations, starting with the model to load; the runtime's common
   # `docker run` is wrapped around it). A full `run_command` can be given
   # instead of `command`.
+  #
+  # `vram_min` is a rough estimate in GB, across all GPUs, of the VRAM a
+  # variant needs: weights, KV cache for its context and runtime overhead. The
+  # models hosted on an instance must fit in its size's `vram`. Qwen3.5 and
+  # Qwen3.6 keep a KV cache in only 1 in 4 layers: about 32K per token for the
+  # 9Bs and 20K for the 35B-A3B. vLLM claims 90% of VRAM by default, and needs
+  # the cache to fit one full-length sequence.
   models = {
     "Qwen/Qwen3.5-9B" = {
       variants = {
         vllm = {
-          runtime = "vllm"
-          size    = "g2-standard-24"
-          command = <<-EOF
+          runtime  = "vllm"
+          vram_min = 36 # 19.3G BF16 weights + 8.6G KV (262K) + overhead, / 0.9
+          command  = <<-EOF
             Qwen/Qwen3.5-9B \
             --trust-remote-code \
             --max-model-len 262144 \
@@ -58,9 +65,9 @@ locals {
           EOF
         }
         llamacpp-q5_k_m = {
-          runtime = "llamacpp"
-          size    = "g2-standard-8"
-          command = <<-EOF
+          runtime  = "llamacpp"
+          vram_min = 18 # 7.1G weights + 8.6G KV (262K) + overhead
+          command  = <<-EOF
             -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
             -c 262144 \
             -np 4 --kv-unified \
@@ -74,9 +81,9 @@ locals {
           EOF
         }
         llamacpp-q5_k_m-multi = {
-          runtime = "llamacpp"
-          size    = "g4-standard-48"
-          command = <<-EOF
+          runtime  = "llamacpp"
+          vram_min = 22 # 7.1G weights + 12.9G KV (393K) + overhead
+          command  = <<-EOF
             -hf bartowski/Qwen_Qwen3.5-9B-GGUF:Q5_K_M \
             -c 393216 \
             -np 5 --kv-unified \
@@ -97,9 +104,9 @@ locals {
     "ornith-ai/Ornith-1.5-9B" = {
       variants = {
         vllm = {
-          runtime = "vllm"
-          size    = "g2-standard-24"
-          command = <<-EOF
+          runtime  = "vllm"
+          vram_min = 36 # 19.3G BF16 weights + 8.6G KV (262K) + overhead, / 0.9
+          command  = <<-EOF
             ornith-ai/Ornith-1.5-9B \
             --trust-remote-code \
             --max-model-len 262144 \
@@ -108,9 +115,9 @@ locals {
           EOF
         }
         llamacpp-q5_k_m = {
-          runtime = "llamacpp"
-          size    = "g2-standard-8"
-          command = <<-EOF
+          runtime  = "llamacpp"
+          vram_min = 18 # 6.9G weights + 8.6G KV (262K) + overhead
+          command  = <<-EOF
             -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
             -c 262144 \
             -np 4 --kv-unified \
@@ -123,9 +130,9 @@ locals {
           EOF
         }
         llamacpp-q5_k_m-multi = {
-          runtime = "llamacpp"
-          size    = "g4-standard-48"
-          command = <<-EOF
+          runtime  = "llamacpp"
+          vram_min = 22 # 6.9G weights + 12.9G KV (393K) + overhead
+          command  = <<-EOF
             -hf bartowski/Ornith-1.5-9B-GGUF:Q5_K_M \
             -c 393216 \
             -np 5 --kv-unified \
@@ -141,11 +148,11 @@ locals {
     }
     "Qwen/Qwen3.6-35B-A3B" = {
       variants = {
-        # Plenty of room.
+        # Plenty of room on 4x L4 (96G).
         vllm-fp8 = {
-          runtime = "vllm"
-          size    = "g2-standard-48"
-          command = <<-EOF
+          runtime  = "vllm"
+          vram_min = 54 # 37.5G FP8 weights + 5.4G KV (262K) + overhead, / 0.9
+          command  = <<-EOF
             Qwen/Qwen3.6-35B-A3B-FP8 \
             --max-model-len 262144 \
             --reasoning-parser qwen3 \
@@ -157,9 +164,9 @@ locals {
         # ~25G of Q5_K_M weights plus ~5G of KV cache for the full 262K context
         # fits comfortably on 2x L4 (48G).
         llamacpp-q5_k_m = {
-          runtime = "llamacpp"
-          size    = "g2-standard-24"
-          command = <<-EOF
+          runtime  = "llamacpp"
+          vram_min = 34 # 25.9G weights + 5.4G KV (262K) + overhead
+          command  = <<-EOF
             -hf bartowski/Qwen_Qwen3.6-35B-A3B-GGUF:Q5_K_M \
             -c 262144 \
             --no-mmproj \
@@ -177,79 +184,121 @@ locals {
     }
   }
 
-  # Deployed instances, keyed by the model name they serve (and scallama routes
-  # by). The VM is named after the last path segment of the key.
+  # Base port per runtime. Each model on an instance gets the next port of its
+  # runtime, in list order: vLLM 8000, 8001, ..., llama.cpp 9931, 9932, ...
+  runtime_ports = {
+    vllm     = 8000
+    llamacpp = 9931
+  }
+
+  # Deployed instances, keyed by VM name. Each one hosts `models`, a list of
+  # `model` (a key of `local.models`) and `variant` (a key of its variants),
+  # served under the model's name (which scallama routes by). A model can only
+  # be hosted by one instance.
+  #
+  # Each instance sets its machine `size`, a key of `local.sizes`. Its models'
+  # runtimes must all use the same machine image.
   #
   # Each instance sets the `region` it runs in, which must be a key of
   # `var.region_subnets`. Its group spreads instances across the zones of the
   # region that offer the instance's machine type. Set `zones` (a list of zone
   # names) to use exactly those zones instead.
-  model_instances = {
-    "Qwen/Qwen3.5-9B" = {
-      model   = "Qwen/Qwen3.5-9B"
-      region  = "us-central1"
-      variant = "llamacpp-q5_k_m-multi"
-      count   = 0
-      spot    = true
+  instances = {
+    "qwen3-5-9b" = {
+      region = "us-central1"
+      size   = "g4-standard-48"
+      count  = 0
+      spot   = true
+      models = [
+        { model = "Qwen/Qwen3.5-9B", variant = "llamacpp-q5_k_m-multi" },
+      ]
       # stop_when_ready = local.vllm_stop
     }
-    "ornith-ai/Ornith-1.5-9B" = {
-      model   = "ornith-ai/Ornith-1.5-9B"
-      region  = "us-central1"
-      variant = "llamacpp-q5_k_m-multi"
-      count   = 0
-      spot    = true
+    "ornith-1-5-9b" = {
+      region = "us-central1"
+      size   = "g4-standard-48"
+      count  = 0
+      spot   = true
+      models = [
+        { model = "ornith-ai/Ornith-1.5-9B", variant = "llamacpp-q5_k_m-multi" },
+      ]
       # stop_when_ready = local.vllm_stop
     }
-    "Qwen/Qwen3.6-35B-A3B" = {
-      model           = "Qwen/Qwen3.6-35B-A3B"
-      variant         = "llamacpp-q5_k_m"
-      region          = "us-central1"
-      count           = 0
-      spot            = false
+    "qwen3-6-35b-a3b" = {
+      region = "us-central1"
+      size   = "g2-standard-24"
+      count  = 0
+      spot   = false
+      models = [
+        { model = "Qwen/Qwen3.6-35B-A3B", variant = "llamacpp-q5_k_m" },
+      ]
       # stop_when_ready = local.vllm_stop
     }
   }
 
-  instances = {
-    for name, instance in local.model_instances : name => merge(instance, {
-      vm_name = replace(lower(element(split("/", name), length(split("/", name)) - 1)), "/[^a-z0-9-]/", "-")
-      variant = local.models[instance.model].variants[instance.variant]
+  resolved_instances = {
+    for name, instance in local.instances : name => merge(instance, {
+      models = [
+        for i, m in instance.models : merge(m, {
+          variant = local.models[m.model].variants[m.variant]
+          port = local.runtime_ports[local.models[m.model].variants[m.variant].runtime] + length([
+            for prev in slice(instance.models, 0, i) : prev
+            if local.models[prev.model].variants[prev.variant].runtime == local.models[m.model].variants[m.variant].runtime
+          ])
+        })
+      ]
+      image = var.machine_image[local.models[instance.models[0].model].variants[instance.models[0].variant].runtime]
     })
   }
-  active_instances = { for name, instance in local.instances : name => instance if instance.count > 0 }
+  active_instances = { for name, instance in local.resolved_instances : name => instance if instance.count > 0 }
+
+  # Every hosted model, with the instance hosting it, keyed by model name.
+  # A model listed on more than one instance fails here as a duplicate key.
+  hosted_models = {
+    for m in flatten([
+      for name, instance in local.resolved_instances : [
+        for m in instance.models : merge(m, { instance = name })
+      ]
+    ]) : m.model => m
+  }
 
   # llama.cpp splits layers across all GPUs by default, and enables Jinja chat
   # templates (tool calling) and reasoning extraction out of the box.
+  #
+  # A variant's `run_command` replaces the whole `docker run`, and must serve
+  # on the port assigned to it.
   run_commands = {
-    for name, instance in local.instances : name => try(instance.variant.run_command, {
-      vllm     = <<-EOF
-        docker run -d --name vllm --gpus all \
-          --restart unless-stopped \
-          --privileged --ipc=host -p 8000:8000 \
-          -e HF_TOKEN \
-          -v /mnt/local-ssd/cache:/root/.cache \
-          vllm/vllm-openai:latest \
-          ${indent(2, trimspace(instance.variant.command))} \
-          --served-model-name ${name} \
-          --tensor-parallel-size ${local.sizes[instance.variant.size].gpus} \
-          --enable-auto-tool-choice
-      EOF
-      llamacpp = <<-EOF
-        docker run -d --name llama --gpus all \
-          --restart unless-stopped \
-          --health-cmd 'curl -f http://localhost:9931/health' \
-          -p 9931:9931 \
-          -e HF_TOKEN \
-          -v /mnt/local-ssd/cache:/root/.cache \
-          ghcr.io/ggml-org/llama.cpp:server-cuda-b11429 \
-          --alias ${name} \
-          -ngl all \
-          --metrics \
-          --port 9931 \
-          ${indent(2, trimspace(instance.variant.command))}
-      EOF
-    }[instance.variant.runtime])
+    for name, instance in local.resolved_instances : name => join("\n", [
+      for m in instance.models : try(m.variant.run_command, {
+        vllm     = <<-EOF
+          docker run -d --name vllm-${m.port} --gpus all \
+            --restart unless-stopped \
+            --privileged --ipc=host -p ${m.port}:${m.port} \
+            -e HF_TOKEN \
+            -v /mnt/local-ssd/cache:/root/.cache \
+            vllm/vllm-openai:latest \
+            ${indent(2, trimspace(m.variant.command))} \
+            --served-model-name ${m.model} \
+            --port ${m.port} \
+            --tensor-parallel-size ${local.sizes[instance.size].gpus} \
+            --enable-auto-tool-choice
+        EOF
+        llamacpp = <<-EOF
+          docker run -d --name llama-${m.port} --gpus all \
+            --restart unless-stopped \
+            --health-cmd 'curl -f http://localhost:${m.port}/health' \
+            -p ${m.port}:${m.port} \
+            -e HF_TOKEN \
+            -v /mnt/local-ssd/cache:/root/.cache \
+            ghcr.io/ggml-org/llama.cpp:server-cuda-b11429 \
+            --alias ${m.model} \
+            -ngl all \
+            --metrics \
+            --port ${m.port} \
+            ${indent(2, trimspace(m.variant.command))}
+        EOF
+      }[m.variant.runtime])
+    ])
   }
 }
 
@@ -294,33 +343,33 @@ resource "google_compute_firewall" "allow_egress" {
   direction          = "EGRESS"
 }
 
-# Instance template per active model instance. The template carries everything
-# that varies per model (size, spot, service account and startup script), and
-# is rolled out by the model's managed instance group.
+# Instance template per active instance. The template carries everything that
+# varies per instance (size, spot, service account and startup script), and is
+# rolled out by the instance's managed instance group.
 resource "google_compute_instance_template" "templates" {
   for_each = local.active_instances
 
-  name_prefix  = "${each.value.vm_name}-"
-  machine_type = each.value.variant.size
+  name_prefix  = "${each.key}-"
+  machine_type = each.value.size
 
   labels = {
-    gpus   = tostring(local.sizes[each.value.variant.size].gpus)
-    disks  = tostring(local.sizes[each.value.variant.size].disks)
+    gpus   = tostring(local.sizes[each.value.size].gpus)
+    disks  = tostring(local.sizes[each.value.size].disks)
     region = each.value.region
   }
 
   // Disk configuration
   disk {
-    source_image = var.machine_image[each.value.variant.runtime]
+    source_image = each.value.image
     auto_delete  = true
     boot         = true
     disk_size_gb = 50
-    disk_type    = lookup(local.sizes[each.value.variant.size], "disk_type", "pd-balanced")
+    disk_type    = lookup(local.sizes[each.value.size], "disk_type", "pd-balanced")
   }
 
   // Dynamic Local SSD (Scratch disks)
   dynamic "disk" {
-    for_each = range(local.sizes[each.value.variant.size].disks)
+    for_each = range(local.sizes[each.value.size].disks)
     content {
       disk_type    = "local-ssd"
       interface    = "NVME"
@@ -408,6 +457,14 @@ EOF
       condition     = contains(keys(var.region_subnets), each.value.region)
       error_message = "Region \"${each.value.region}\" for \"${each.key}\" has no entry in var.region_subnets."
     }
+    precondition {
+      condition     = sum([for m in each.value.models : m.variant.vram_min]) <= local.sizes[each.value.size].vram
+      error_message = "Models on \"${each.key}\" need ~${sum([for m in each.value.models : m.variant.vram_min])}G of VRAM, but \"${each.value.size}\" has ${local.sizes[each.value.size].vram}G."
+    }
+    precondition {
+      condition     = length(distinct([for m in each.value.models : var.machine_image[m.variant.runtime]])) == 1
+      error_message = "Models on \"${each.key}\" have runtimes with different machine images."
+    }
   }
 }
 
@@ -415,13 +472,13 @@ EOF
 resource "google_service_account" "vm" {
   for_each = local.active_instances
 
-  account_id   = each.value.vm_name
-  display_name = "Scallama inference VM for ${each.key}"
+  account_id   = each.key
+  display_name = "Scallama inference VM ${each.key}"
 
   lifecycle {
     precondition {
-      condition     = length(each.value.vm_name) >= 6 && length(each.value.vm_name) <= 30
-      error_message = "VM name \"${each.value.vm_name}\" must be 6-30 characters to name its service account."
+      condition     = length(each.key) >= 6 && length(each.key) <= 30
+      error_message = "VM name \"${each.key}\" must be 6-30 characters to name its service account."
     }
   }
 }
@@ -478,7 +535,7 @@ resource "google_project_iam_member" "vm_observability" {
   depends_on = [google_project_service.services]
 }
 
-# All zones of each region with an active model instance
+# All zones of each region with an active instance
 data "google_compute_zones" "available" {
   for_each = toset([for instance in local.active_instances : instance.region])
 
@@ -486,18 +543,18 @@ data "google_compute_zones" "available" {
 }
 
 locals {
-  # Candidate zones per model: the `zones` override if given, else the region's
+  # Candidate zones per instance: the `zones` override if given, else the region's
   zone_candidates = {
     for name, instance in local.active_instances :
     name => try(instance.zones, data.google_compute_zones.available[instance.region].names)
   }
 
-  # Zone and machine type pairs to check, for models without a `zones` override
+  # Zone and machine type pairs to check, for instances without a `zones` override
   machine_type_checks = merge([
     for name, instance in local.active_instances : {
-      for zone in local.zone_candidates[name] : "${zone}|${instance.variant.size}" => {
+      for zone in local.zone_candidates[name] : "${zone}|${instance.size}" => {
         zone = zone
-        size = instance.variant.size
+        size = instance.size
       }
     } if try(instance.zones, null) == null
   ]...)
@@ -512,20 +569,20 @@ data "google_compute_machine_types" "available" {
 }
 
 locals {
-  # Zones each model's group is spread over
+  # Zones each instance's group is spread over
   mig_zones = {
     for name, instance in local.active_instances : name => (
       try(instance.zones, null) != null ? instance.zones : [
         for zone in local.zone_candidates[name] : zone
-        if length(data.google_compute_machine_types.available["${zone}|${instance.variant.size}"].machine_types) > 0
+        if length(data.google_compute_machine_types.available["${zone}|${instance.size}"].machine_types) > 0
       ]
     )
   }
 }
 
-# One regional managed instance group per active model instance, spread across
-# the zones of the model's region that offer its machine type. No load
-# balancing: instances are addressed individually.
+# One regional managed instance group per active instance, spread across the
+# zones of its region that offer its machine type. No load balancing: VMs are
+# addressed individually.
 resource "google_compute_region_instance_group_manager" "mig" {
   for_each = local.active_instances
 
@@ -533,8 +590,8 @@ resource "google_compute_region_instance_group_manager" "mig" {
     create = "5m"
   }
 
-  name                      = each.value.vm_name
-  base_instance_name        = each.value.vm_name
+  name                      = each.key
+  base_instance_name        = each.key
   region                    = each.value.region
   distribution_policy_zones = local.mig_zones[each.key]
   target_size               = each.value.count
@@ -572,7 +629,7 @@ resource "google_compute_region_instance_group_manager" "mig" {
   lifecycle {
     precondition {
       condition     = length(local.mig_zones[each.key]) > 0
-      error_message = "No zone in \"${each.value.region}\" offers machine type \"${each.value.variant.size}\" for \"${each.key}\". Set `zones` for it, or pick another size or region."
+      error_message = "No zone in \"${each.value.region}\" offers machine type \"${each.value.size}\" for \"${each.key}\". Set `zones` for it, or pick another size or region."
     }
   }
 }
@@ -591,7 +648,7 @@ locals {
     name => sort([for i in group.instances : i.instance])
   }
 
-  # One entry per desired instance, keyed "<model>#<index>"
+  # One entry per desired VM, keyed "<instance>#<index>"
   mig_instance_keys = merge([
     for name, instance in local.active_instances : {
       for i in range(instance.count) : "${name}#${i}" => {
@@ -613,15 +670,15 @@ data "google_compute_instance" "mig" {
 }
 
 locals {
-  # Instances per model, in a stable order
-  model_vms = {
-    for name, instance in local.instances : name => [
+  # VMs per instance, in a stable order
+  instance_vms = {
+    for name, instance in local.resolved_instances : name => [
       for i in range(instance.count) : data.google_compute_instance.mig["${name}#${i}"]
       if contains(keys(local.active_instances), name)
     ]
   }
 
-  # For now only the first instance of a model is used where one is needed
+  # For now only the first VM of an instance is used where one is needed
   # (scallama_config output).
-  first_vm = { for name, vms in local.model_vms : name => vms[0] if length(vms) > 0 }
+  first_vm = { for name, vms in local.instance_vms : name => vms[0] if length(vms) > 0 }
 }
